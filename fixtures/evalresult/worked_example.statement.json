@@ -1,0 +1,87 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    { "name": "gemma-4-31b + private-adapter",
+      "digest": { "sha256": "9358688c07c087fbb1e602dc64f0b02a3424121975f982b2f5070cd4446bfbc5" } }
+  ],
+  "predicateType": "https://www.aisafety.sg/fourpillars/EvalResult/v0.1",
+  "predicate": {
+    "version": "fourpillars-evalresult-v0.1",
+    "system": {
+      "pipelineDigest": "9358688c07c087fbb1e602dc64f0b02a3424121975f982b2f5070cd4446bfbc5",
+      "components": [
+        { "role": "adapter", "scheme": "dirhash-sha256/1",
+          "digest": "932e9f48f32c1eb067829136e7bd7cd5d07372b18cef469509c49b0921a42604",
+          "name": "private-adapter" },
+        { "role": "base_weights", "scheme": "modelwrap/2",
+          "digest": "cda2f261f72d80a847eb6fabea1f9949bf14ce5bb323808a8e2e4a9f09018357",
+          "name": "gemma-4-31b",
+          "alsoKnownAs": [
+            { "scheme": "hf-revision/1",
+              "ref": "google/gemma-4-31B-it@842da3794eaa0b77d5f08bae87a17459d91ff475" }
+          ] },
+        { "role": "runtime_image", "scheme": "oci/1",
+          "digest": "sha256:ac6360062cf08cd039f09225e745e699bb021d21b8ac26a1eac20df725d0e134" },
+        { "role": "sampling", "scheme": "jcs-sha256/1",
+          "digest": "4849ebe6b2bd6a65d4fb549b3efc041e9021ff4562e8cfb8d2d163d9ab3e361b",
+          "name": "max_tokens=100, temperature=0.8, top_k=40" }
+      ]
+    },
+    "eval": {
+      "evalDigest": "639c3a535d8327abee97d729e0a16245605333924709b03c3a4a4a845c771375",
+      "evalSet": { "scheme": "file-sha256/1",
+                   "digest": "254082e2808a4af8ae1b55965759801b3f4c32efe8a19c057f1310c2fae338ea" },
+      "harness": { "scheme": "oci/1",
+                   "digest": "sha256:ac6360062cf08cd039f09225e745e699bb021d21b8ac26a1eac20df725d0e134" },
+      "harnessVersion": "0.1.0",
+      "public": false
+    },
+    "results": {
+      "metrics": [],
+      "counts": { "submitted": 10, "completed": 10, "failed": 0 },
+      "scored": false
+    },
+    "execution": {
+      "platform": "tinfoil-containers",
+      "cvmVersion": "0.14.7",
+      "runId": "0d96fdd793d045919cea112ce8b93ace",
+      "configDigest": "c423324f484ea55f13481dcc00bbb3104c402786e5dd82ce49a2add141ab10c3",
+      "attestation": {
+        "type": "sev-snp",
+        "measurement": "PLACEHOLDER-not-in-dbe-receipt",
+        "reportData": "PLACEHOLDER-must-bind-sha256-of-run-public-key",
+        "quote": "PLACEHOLDER-base64-raw-quote",
+        "referenceValue": { "source": "sigstore",
+                            "repo": "github.com/tinfoilsh/double-blind-eval", "tag": "v0.1.0" }
+      },
+      "startedAt": "2026-09-14T02:42:58Z",
+      "finishedAt": "2026-09-14T02:43:07Z",
+      "runPublicKey": "3a1f29d3b41787adaa3aed394b43011d00f5a059177380c7ca6423d252fe39e6"
+    },
+    "parties": [
+      { "role": "model_provider", "identity": { "scheme": "ed25519-key/1",
+        "publicKey": "ded3f8e215cd654408bcf1d0ae1937639e7c2d13a42d498c77d506b8c6c29fe9" } },
+      { "role": "evaluator", "identity": { "scheme": "ed25519-key/1",
+        "publicKey": "3888833eb8844b23a79a5a4bf258b3c718fd0cc3997b8d000f29f88855252d9c" } },
+      { "role": "compute", "identity": { "scheme": "named/1", "name": "Tinfoil" } }
+    ],
+    "consent": {
+      "manifestDigest": "8112aa626f68a50ba6b276844bd04b9e9c0e2c8c81c09e8a6dbe1bbaec49d27b",
+      "approvals": [
+        { "party": "model-owner",
+          "publicKey": "ded3f8e215cd654408bcf1d0ae1937639e7c2d13a42d498c77d506b8c6c29fe9",
+          "signature": "9DHEQkL99f6qdNmercaKtUxS/42qLU6qLm4XKQXTY2YnM3MwcxDlVPdD6bcUgpr92K+aQ1cTaBttc6z/mANRAg==" },
+        { "party": "benchmark-owner",
+          "publicKey": "3888833eb8844b23a79a5a4bf258b3c718fd0cc3997b8d000f29f88855252d9c",
+          "signature": "nMUk7oohmgHq39LoUlBll9LqD6q20t2Xuezggl2p/iUek1IgO2vtoEwL3zTr05Qwz/5PhkVRHK5TvtsPipoRBw==" }
+      ]
+    },
+    "policy": {
+      "disclosure": "public",
+      "outputPolicy": [
+        { "party": "benchmark-owner", "grants": ["results", "receipt"] },
+        { "party": "model-owner", "grants": ["receipt"] }
+      ]
+    }
+  }
+}

@@ -1,0 +1,15 @@
+# registry-policy.dev.example.yaml: template for the dev-mode trust policy.
+# The dev server copies this to registry-policy.dev.yaml (gitignored) when that file is missing.
+# After editing: run scripts/rebuild_index.py, then restart.
+trusted_code:            # check 4: whose Sigstore-signed reference measurements count (must be non-empty)
+  - repo: tinfoilsh/double-blind-eval
+benchmark_owners:        # acceptance gate: Ed25519 public key (64 hex) -> display name.
+                         # Keys printed by scripts/make_fixtures.py. Never add C14_unlisted_bo's key.
+  - public_key: "3888833eb8844b23a79a5a4bf258b3c718fd0cc3997b8d000f29f88855252d9c"
+    display: DBE sample benchmark owner  # the worked example's (fixtures/evalresult/)
+  - public_key: "132a4f3e5d9a3027219c43b3f0a27c792d5992ffb347159f26c7a23d14d0a9e5"
+    display: Synthetic refusal eval owner (synthetic)
+  - public_key: "d5df10baf7e26dfb8843739e2082ef7e039084c51c9eb5e72b5a84f8b5520aff"
+    display: Synthetic bio-risk screen owner (synthetic)
+  - public_key: "91ff716bb85775ab4d3a15e89aa5b874cf884c94a2fd98620e08f4acc5531580"
+    display: Synthetic honesty probe owner (synthetic)

@@ -1,0 +1,44 @@
+[project]
+name = "double-blind-eval-registry"
+version = "0.1.0"
+description = "Double Blind Eval Registry: a local web app that verifies and indexes EvalResult receipts."
+requires-python = "~=3.12.0"
+dependencies = [
+    "flask==3.1.3",
+    "jiter==0.17.0",
+    "pydantic==2.13.5",
+    "pyyaml==6.0.3",
+    "requests==2.34.2",
+    "rfc8785==0.1.4",
+    "securesystemslib==1.5.1",
+    "sigstore==4.5.0",
+    "sigstore-models==0.0.6",
+    "tinfoil==0.14.0",
+    "tuf==7.0.1",
+    "urllib3==2.8.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==9.1.1",
+]
+
+[build-system]
+requires = ["uv_build==0.11.13"]
+build-backend = "uv_build"
+
+[tool.uv]
+# Supply-chain cooldown: never resolve a release uploaded in the last 7 days.
+exclude-newer = "7 days"
+
+[tool.uv.build-backend]
+# Flat layout: the package is ./registry, not ./src/registry.
+module-name = "registry"
+module-root = ""
+
+[tool.pytest.ini_options]
+addopts = ["--strict-markers"]
+markers = [
+    "network: needs network access (TUF, Tinfoil, GitHub, Sigstore)",
+]
+testpaths = ["tests"]

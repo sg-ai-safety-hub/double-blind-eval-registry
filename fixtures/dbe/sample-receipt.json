@@ -1,0 +1,60 @@
+{
+  "receipt": {
+    "run_id": "0d96fdd793d045919cea112ce8b93ace",
+    "manifest": {
+      "version": "dbe-manifest-v1",
+      "parties": {
+        "benchmark-owner": "3888833eb8844b23a79a5a4bf258b3c718fd0cc3997b8d000f29f88855252d9c",
+        "model-owner": "ded3f8e215cd654408bcf1d0ae1937639e7c2d13a42d498c77d506b8c6c29fe9"
+      },
+      "output_policy": "bo:results+receipt,mo:receipt",
+      "sampling": {
+        "max_tokens": 100,
+        "temperature": 0.8,
+        "top_k": 40
+      },
+      "base_model": "gemma4-31b",
+      "served_model": "private-adapter",
+      "adapter_sha256": "932e9f48f32c1eb067829136e7bd7cd5d07372b18cef469509c49b0921a42604",
+      "benchmark_sha256": "254082e2808a4af8ae1b55965759801b3f4c32efe8a19c057f1310c2fae338ea",
+      "prompt_count": 10,
+      "scored": false
+    },
+    "manifest_sha256": "8112aa626f68a50ba6b276844bd04b9e9c0e2c8c81c09e8a6dbe1bbaec49d27b",
+    "parties": {
+      "benchmark-owner": "3888833eb8844b23a79a5a4bf258b3c718fd0cc3997b8d000f29f88855252d9c",
+      "model-owner": "ded3f8e215cd654408bcf1d0ae1937639e7c2d13a42d498c77d506b8c6c29fe9"
+    },
+    "approvals": {
+      "model-owner": {
+        "manifest_sha256": "8112aa626f68a50ba6b276844bd04b9e9c0e2c8c81c09e8a6dbe1bbaec49d27b",
+        "signature": "9DHEQkL99f6qdNmercaKtUxS/42qLU6qLm4XKQXTY2YnM3MwcxDlVPdD6bcUgpr92K+aQ1cTaBttc6z/mANRAg=="
+      },
+      "benchmark-owner": {
+        "manifest_sha256": "8112aa626f68a50ba6b276844bd04b9e9c0e2c8c81c09e8a6dbe1bbaec49d27b",
+        "signature": "nMUk7oohmgHq39LoUlBll9LqD6q20t2Xuezggl2p/iUek1IgO2vtoEwL3zTr05Qwz/5PhkVRHK5TvtsPipoRBw=="
+      }
+    },
+    "identity": {
+      "config_sha256": "c423324f484ea55f13481dcc00bbb3104c402786e5dd82ce49a2add141ab10c3",
+      "attestation_document_sha256": "c9d9f0cdabefe6063a44852f359d837d02a2bcf29e0bc115e0e4f6fca9caf8df",
+      "image": "ghcr.io/tinfoilsh/double-blind-eval@sha256:ac6360062cf08cd039f09225e745e699bb021d21b8ac26a1eac20df725d0e134",
+      "cvm_version": "0.14.7",
+      "base_model": {
+        "name": "gemma-4-31b",
+        "repo": "google/gemma-4-31B-it@842da3794eaa0b77d5f08bae87a17459d91ff475",
+        "roothash": "cda2f261f72d80a847eb6fabea1f9949bf14ce5bb323808a8e2e4a9f09018357"
+      },
+      "harness_version": "0.1.0"
+    },
+    "prompt_count": 10,
+    "completed": 10,
+    "failed_prompts": 0,
+    "score": null,
+    "started_at": 1789353778.9999723,
+    "finished_at": 1789353787.4284256,
+    "version": "dbe-receipt-v1",
+    "run_public_key": "3a1f29d3b41787adaa3aed394b43011d00f5a059177380c7ca6423d252fe39e6"
+  },
+  "signature": "QTjI/uWiVp3Y2SxUw8ujzJu2P/mFjDu9/pYoIWwkwZ6a1hWf7Yw/URqGxt9eg6DI+3XRnGcIFWsdv8Z7w2s9Cw=="
+}
