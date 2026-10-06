@@ -6,7 +6,10 @@ from pathlib import Path
 import pytest
 
 from registry.app import create_app
-from registry.config import ConfigError
+from registry.config import ConfigError, load_config
+from registry.ingest import rebuild
+from registry.refcache import RefCache
+from registry.store import Store
 
 POLICY = b"""\
 trusted_code:
@@ -90,3 +93,47 @@ def test_registry_debug_env_enables_debug_logging(monkeypatch, registry_logger, 
         record.name == "registry.config" and record.getMessage().startswith("ACCEPT policy")
         for record in caplog.records
     )
+
+
+# --- the startup guard -------------------------------------------------------
+
+def test_the_first_start_creates_the_index(client):
+    assert Path("data/strict/index.sqlite3").is_file()
+
+
+def test_refuses_to_serve_an_index_built_under_another_policy():
+    Path("registry-policy.yaml").write_bytes(POLICY)
+    create_app()
+    Path("registry-policy.yaml").write_bytes(POLICY + b"# edited\n")
+    with pytest.raises(ConfigError, match="another policy or mode"):
+        create_app()
+
+
+def test_refuses_to_serve_an_index_built_in_another_mode(monkeypatch):
+    monkeypatch.setenv("REGISTRY_DATA_DIR", "data/shared")
+    for name in ("registry-policy.yaml", "registry-policy.dev.yaml"):
+        Path(name).write_bytes(POLICY)
+    create_app()
+    monkeypatch.setenv("REGISTRY_MODE", "dev")
+    with pytest.raises(ConfigError, match="another policy or mode"):
+        create_app()
+
+
+def test_the_refusal_gives_the_exact_rebuild_command(tmp_path):
+    Path("registry-policy.yaml").write_bytes(POLICY)
+    create_app()
+    Path("registry-policy.yaml").write_bytes(POLICY + b"# edited\n")
+    with pytest.raises(ConfigError) as e:
+        create_app()
+    assert str(e.value).endswith(
+        f"Rebuild it, then restart: REGISTRY_MODE=strict REGISTRY_DATA_DIR={tmp_path / 'data' / 'strict'} "
+        f"REGISTRY_POLICY={tmp_path / 'registry-policy.yaml'} uv run python scripts/rebuild_index.py")
+
+
+def test_serves_again_after_a_rebuild():
+    Path("registry-policy.yaml").write_bytes(POLICY)
+    create_app()
+    Path("registry-policy.yaml").write_bytes(POLICY + b"# edited\n")
+    config = load_config({})
+    rebuild(config, Store(config.store_dir), RefCache(config.refcache_dir))
+    assert create_app().test_client().get("/api/health").status_code == 200

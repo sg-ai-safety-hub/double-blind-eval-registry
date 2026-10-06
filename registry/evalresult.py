@@ -15,10 +15,12 @@ from typing import Annotated, Any
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
-from registry import spec
+from registry import index, spec
+from registry.model import Accepted
 
 log = logging.getLogger(__name__)
 
+ADAPTER_VERSION = "evalresult-v0.1/1"  # stored with each indexed record: which version of to_index mapped it
 OCI_DIGEST = r"^sha256:[0-9a-f]{64}$"
 REPO = rf"^{re.escape(spec.REFERENCE_REPO_PREFIX)}{spec.GITHUB_OWNER_NAME}$"
 LOWER_HEX_BYTES = r"^(?:[0-9a-f]{2})+$"
@@ -152,6 +154,7 @@ class Execution(_Model):
 class Identity(_Model):
     scheme: NonEmpty
     publicKey: str | None = None  # the key of an ed25519-key/1 identity
+    name: str | None = None  # the name of a named/1 identity
 
 
 class Party(_Model):
@@ -232,3 +235,50 @@ def parse_statement(statement: dict) -> Statement:
     log.debug("ACCEPT schema: %d component(s), %d part(ies)", len(parsed.predicate.system.components),
               len(parsed.predicate.parties))
     return parsed
+
+
+def to_index(statement: Statement, accepted: Accepted) -> index.IndexedRecord:
+    """The adapter: an accepted EvalResult/v0.1 receipt in the index's own shape.
+
+    The only place that maps this format's fields into the index. execution.attestation is left out:
+    the index shows only the enclave facts checks 3 and 4 verified, never the receipt's own claims.
+    """
+    predicate = statement.predicate
+    system, eval_, results, execution = predicate.system, predicate.eval, predicate.results, predicate.execution
+    consent = predicate.consent  # always present: the acceptance gate needs the benchmark owner's approval
+    return index.IndexedRecord(
+        record_id=accepted.record_id,
+        size=accepted.size,
+        received_at=accepted.received_at,
+        state=accepted.state,
+        checks=accepted.checks,
+        enclave=accepted.enclave,
+        benchmark_owner=index.Owner(public_key=predicate.owner_key(spec.BENCHMARK_OWNER),
+                                    display=accepted.benchmark_owner_display),
+        predicate_type=statement.predicateType,
+        adapter_version=ADAPTER_VERSION,
+        subject_name=statement.subject[0].name,
+        system_digest=system.pipelineDigest,
+        components=tuple(
+            index.Component(role=c.role, scheme=c.scheme, digest=c.digest, name=c.name,
+                            also_known_as=tuple(index.Alias(scheme=a.scheme, value=a.ref if a.digest is None else a.digest)
+                                                for a in c.alsoKnownAs or ()))
+            for c in system.components),
+        eval=index.Eval(digest=eval_.evalDigest,
+                        eval_set=index.SchemedDigest(scheme=eval_.evalSet.scheme, digest=eval_.evalSet.digest),
+                        harness=index.SchemedDigest(scheme=eval_.harness.scheme, digest=eval_.harness.digest),
+                        name=eval_.name, harness_version=eval_.harnessVersion, public=eval_.public),
+        results=index.Results(
+            metrics=tuple(results.metrics),
+            counts=None if results.counts is None else index.Counts(
+                submitted=results.counts.submitted, completed=results.counts.completed, failed=results.counts.failed),
+            scored=results.scored),
+        parties=tuple(index.Party(role=p.role, scheme=p.identity.scheme, public_key=p.identity.publicKey,
+                                  name=p.identity.name) for p in predicate.parties),
+        consent=index.Consent(manifest_digest=consent.manifestDigest,
+                              approvals=tuple(index.Approval(party=a.party, public_key=a.publicKey)
+                                              for a in consent.approvals)),
+        reported=index.Reported(platform=execution.platform, cvm_version=execution.cvmVersion,
+                                run_id=execution.runId, config_digest=execution.configDigest,
+                                started_at=execution.startedAt, finished_at=execution.finishedAt),
+    )

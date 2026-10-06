@@ -66,6 +66,18 @@ class Config:
     policy_sha256: str
     policy: Policy
 
+    @property
+    def store_dir(self) -> Path:
+        return self.data_dir / "store"
+
+    @property
+    def refcache_dir(self) -> Path:
+        return self.data_dir / "refcache"
+
+    @property
+    def index_path(self) -> Path:
+        return self.data_dir / "index.sqlite3"
+
 
 def load_config(environ: Mapping[str, str]) -> Config:
     """Build the config from `environ`; raise ConfigError if the registry must not start."""

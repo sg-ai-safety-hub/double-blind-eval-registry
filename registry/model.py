@@ -67,6 +67,22 @@ class VerificationResult:
 
 
 @dataclass(frozen=True)
+class Accepted:
+    """What the registry established about a receipt it accepts, the same for every receipt format.
+
+    A format's adapter adds what the receipt itself says, to make the record the index holds.
+    """
+
+    record_id: str
+    size: int  # bytes, as received
+    received_at: str  # the registry's own clock
+    state: str  # "verified" or "incomplete"
+    checks: tuple[Check, ...]
+    enclave: Enclave | None
+    benchmark_owner_display: str  # the name this registry's policy gives the benchmark owner's key
+
+
+@dataclass(frozen=True)
 class IngestResult:
     """The answer to a POST: an HTTP status and its JSON body."""
 
