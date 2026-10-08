@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from fixture_data import DEV_POLICY, EXPECTED, STRICT_POLICY, params, record
 
-from registry import checks_tinfoil
+from registry import checks_tinfoil, spec
 from registry.app import create_app
 from registry.model import VerificationUnavailable
 
@@ -145,3 +145,84 @@ def test_a_network_failure_is_a_503_and_stores_nothing(dev, monkeypatch):
     assert response.status_code == 503
     assert response.get_json()["error"] == "Service Unavailable"
     assert stored_files("dev") == []
+
+
+# --- reads -------------------------------------------------------------------
+
+DEV_ACCEPTED = [name for name, entry in EXPECTED.items() if entry["dev"]["status"] == 201]
+ROUTES_WITH_AN_ID = ["/api/records/{}", "/api/records/{}/record.dsse.json", "/api/systems/{}", "/api/components/{}",
+                     "/api/models/{}", "/api/evals/{}", "/api/lookup/{}"]
+
+
+@pytest.fixture
+def seeded(dev):
+    for name in DEV_ACCEPTED:
+        assert post(dev, record(name)).status_code == 201
+    return dev
+
+
+def test_a_record_reads_back_as_it_was_accepted(dev):
+    posted = post(dev, record("D1")).get_json()
+    assert dev.get(f"/api/records/{posted['recordId']}").get_json() == posted
+
+
+@pytest.mark.parametrize("name", DEV_ACCEPTED)
+def test_a_download_is_the_stored_bytes_and_hashes_to_its_id(seeded, name):
+    record_id = EXPECTED[name]["recordId"]
+    response = seeded.get(f"/api/records/{record_id}/record.dsse.json")
+    assert response.status_code == 200
+    assert response.data == record(name)
+    assert hashlib.sha256(response.data).hexdigest() == record_id
+    assert response.headers["Content-Disposition"] == "attachment; filename=record.dsse.json"
+    assert seeded.get(f"/api/records/{record_id}").get_json()["size"] == len(response.data)
+
+
+def test_recent_records_take_a_limit(seeded):
+    assert len(seeded.get("/api/records").get_json()["records"]) == len(DEV_ACCEPTED)  # fewer than the default 20
+    assert len(seeded.get("/api/records?limit=2").get_json()["records"]) == 2
+
+
+@pytest.mark.parametrize("limit", ["0", "-1", "101"])
+def test_a_limit_out_of_range_is_a_400(dev, limit):
+    response = dev.get(f"/api/records?limit={limit}")
+    assert response.status_code == 400
+    assert response.get_json()["detail"] == "limit must be from 1 to 100"
+
+
+def test_the_read_endpoints_answer_from_the_index(seeded):
+    d1 = seeded.get(f"/api/records/{EXPECTED['D1']['recordId']}").get_json()
+    weights, runtime = d1["components"][0], d1["components"][1]
+    runtime_hex = runtime["digest"].removeprefix("sha256:")  # an OCI digest
+    assert seeded.get(f"/api/systems/{d1['systemDigest']}").get_json()["digest"] == d1["systemDigest"]
+    assert seeded.get(f"/api/evals/{d1['eval']['digest']}").get_json()["names"] == [d1["eval"]["name"]]
+    assert seeded.get(f"/api/models/{weights['digest']}").get_json()["names"] == [weights["name"]]
+    assert seeded.get(f"/api/components/{runtime_hex}").get_json()["names"] == [runtime["name"]]
+    assert len(seeded.get("/api/models").get_json()["models"]) == 4
+    assert len(seeded.get("/api/evals").get_json()["evals"]) == 4
+    assert seeded.get(f"/api/lookup/{d1['systemDigest']}").get_json() == {"kind": "system", "id": d1["systemDigest"]}
+
+
+@pytest.mark.parametrize("route", ROUTES_WITH_AN_ID)
+@pytest.mark.parametrize("bad", ["AB" * 32, "ab" * 31, "ab" * 33, "sha256:" + "ab" * 32, "g" * 64],
+                         ids=["uppercase", "short", "long", "prefixed", "not-hex"])
+def test_ids_in_paths_must_be_64_lowercase_hex(seeded, route, bad):
+    response = seeded.get(route.format(bad))
+    assert response.status_code == 404
+    assert response.is_json
+
+
+@pytest.mark.parametrize("route", ROUTES_WITH_AN_ID)
+def test_an_unknown_id_is_a_404(seeded, route):
+    response = seeded.get(route.format("ab" * 32))
+    assert response.status_code == 404
+    assert response.get_json()["detail"] == "nothing on file for that"
+
+
+def test_no_answer_shows_a_quote_sentinel(seeded):
+    # Their quotes are sentinels, and nothing from execution.attestation is ever shown.
+    d1 = seeded.get(f"/api/records/{EXPECTED['D1']['recordId']}").get_json()
+    pages = ["/api/records", "/api/models", "/api/evals", f"/api/systems/{d1['systemDigest']}",
+             f"/api/evals/{d1['eval']['digest']}", f"/api/models/{d1['components'][0]['digest']}"]
+    for page in pages:
+        text = seeded.get(page).get_data(as_text=True)
+        assert spec.SIMULATED_PREFIX not in text and spec.PLACEHOLDER_PREFIX not in text, page

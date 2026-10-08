@@ -41,6 +41,14 @@ def test_dev_mode_has_its_own_data_dir_and_policy(tmp_path):
     assert config.policy_path == tmp_path / "registry-policy.dev.yaml"
 
 
+def test_the_store_refcache_and_index_live_in_the_data_dir(tmp_path):
+    write("registry-policy.yaml")
+    config = load_config({})
+    assert config.store_dir == tmp_path / "data" / "strict" / "store"
+    assert config.refcache_dir == tmp_path / "data" / "strict" / "refcache"
+    assert config.index_path == tmp_path / "data" / "strict" / "index.sqlite3"
+
+
 def test_env_overrides_data_dir_and_policy_path(tmp_path):
     write("custom.yaml")
     config = load_config({"REGISTRY_DATA_DIR": "elsewhere", "REGISTRY_POLICY": "custom.yaml"})

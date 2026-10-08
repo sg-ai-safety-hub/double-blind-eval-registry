@@ -1,11 +1,13 @@
 import copy
+import dataclasses
 import json
 from pathlib import Path
 
 import pytest
 
 from registry import spec
-from registry.evalresult import SchemaError, parse_statement
+from registry.evalresult import ADAPTER_VERSION, SchemaError, parse_statement, to_index
+from registry.model import CHECK_IDS, Accepted, Check, Enclave, Status
 
 WORKED_EXAMPLE = Path(__file__).resolve().parents[1] / "fixtures/evalresult/worked_example.statement.json"
 WORKED_EXAMPLE_ROLES = {"model_provider": spec.MODEL_OWNER, "evaluator": spec.BENCHMARK_OWNER}  # to DBE's names
@@ -241,3 +243,111 @@ def test_parse_does_not_modify_its_input():
     before = copy.deepcopy(statement)
     parse_statement(statement)
     assert statement == before
+
+
+def test_a_named_identity_s_name_must_be_a_string():
+    invalid(changed("predicate.parties.2.identity.name", 7), "name")
+
+
+# --- the index adapter -------------------------------------------------------
+
+ACCEPTED = Accepted(record_id="ab" * 32, size=2048, received_at="2026-10-05T01:02:03Z", state="incomplete",
+                    checks=tuple(Check(check_id, Status.PASS, "stand-in") for check_id in CHECK_IDS),
+                    enclave=None, benchmark_owner_display="DBE sample benchmark owner")
+
+
+def indexed(statement: dict | None = None, accepted: Accepted = ACCEPTED) -> dict:
+    """The adapter's record for `statement` (default: the worked example), as the API's JSON."""
+    return to_index(parse_statement(statement or worked_example()), accepted).to_json()
+
+
+def test_the_adapter_keeps_what_the_registry_established():
+    record = indexed()
+    assert (record["recordId"], record["size"], record["receivedAt"]) == ("ab" * 32, 2048, "2026-10-05T01:02:03Z")
+    assert record["state"] == "incomplete"
+    assert record["checks"] == [{"id": check_id, "status": "PASS", "detail": "stand-in"} for check_id in CHECK_IDS]
+    assert record["enclave"] is None
+    assert (record["predicateType"], record["adapterVersion"]) == (spec.PREDICATE_TYPE, ADAPTER_VERSION)
+
+
+def test_the_adapter_carries_the_verified_enclave_facts():
+    enclave = Enclave(measurement="6d" * 48, repo="tinfoilsh/double-blind-eval", release_tag="v0.0.4",
+                      release_digest="fe" * 32)
+    record = indexed(accepted=dataclasses.replace(ACCEPTED, state="verified", enclave=enclave))
+    assert record["state"] == "verified"
+    assert record["enclave"] == {"type": "AMD SEV-SNP", "measurement": "6d" * 48, "repo": "tinfoilsh/double-blind-eval",
+                                 "releaseTag": "v0.0.4", "releaseDigest": "fe" * 32}
+
+
+def test_the_adapter_pairs_the_benchmark_owner_key_with_the_registry_s_display_name():
+    key = worked_example()["predicate"]["parties"][OWNERS[spec.BENCHMARK_OWNER]]["identity"]["publicKey"]
+    assert indexed()["benchmarkOwner"] == {"publicKey": key, "display": "DBE sample benchmark owner"}
+
+
+def test_the_adapter_maps_the_system_and_its_components_in_receipt_order():
+    statement = worked_example()
+    system = statement["predicate"]["system"]
+    record = indexed(statement)
+    assert record["subjectName"] == statement["subject"][0]["name"]
+    assert record["systemDigest"] == system["pipelineDigest"]
+    assert [(c["role"], c["scheme"], c["digest"], c["name"]) for c in record["components"]] == [
+        (c["role"], c["scheme"], c["digest"], c.get("name")) for c in system["components"]]
+    assert record["components"][0]["alsoKnownAs"] == []
+    alias, = system["components"][1]["alsoKnownAs"]
+    assert record["components"][1]["alsoKnownAs"] == [{"scheme": alias["scheme"], "value": alias["ref"]}]
+
+
+def test_an_also_known_as_digest_becomes_its_value():
+    statement = changed("predicate.system.components.1.alsoKnownAs", [{"scheme": "oms/1", "digest": "cd" * 32}])
+    assert indexed(statement)["components"][1]["alsoKnownAs"] == [{"scheme": "oms/1", "value": "cd" * 32}]
+
+
+def test_the_adapter_maps_the_eval():
+    eval_ = worked_example()["predicate"]["eval"]
+    assert indexed()["eval"] == {"digest": eval_["evalDigest"], "evalSet": eval_["evalSet"], "harness": eval_["harness"],
+                                 "name": None, "harnessVersion": eval_["harnessVersion"], "public": eval_["public"]}
+
+
+def test_the_adapter_maps_the_results_with_metric_items_as_given():
+    assert indexed()["results"] == {"metrics": [], "counts": worked_example()["predicate"]["results"]["counts"],
+                                    "scored": False}
+    metrics = [{"name": "x", "value": 1, "unit": "%"}, "free text", [1, 2.5]]
+    assert indexed(changed("predicate.results.metrics", metrics))["results"]["metrics"] == metrics
+
+
+def test_the_adapter_maps_each_party_with_its_key_or_name():
+    parties = worked_example()["predicate"]["parties"]
+    assert indexed()["parties"] == [
+        {"role": p["role"], "scheme": p["identity"]["scheme"], "publicKey": p["identity"].get("publicKey"),
+         "name": p["identity"].get("name")} for p in parties]
+    assert indexed()["parties"][2]["name"] == "Tinfoil"
+
+
+def test_the_adapter_maps_consent_without_its_signatures():
+    consent = worked_example()["predicate"]["consent"]
+    assert indexed()["consent"] == {"manifestDigest": consent["manifestDigest"], "approvals": [
+        {"party": a["party"], "publicKey": a["publicKey"]} for a in consent["approvals"]]}
+
+
+def test_the_adapter_maps_the_run_values_the_receipt_reports():
+    execution = worked_example()["predicate"]["execution"]
+    keys = ("platform", "cvmVersion", "runId", "configDigest", "startedAt", "finishedAt")
+    assert indexed()["reported"] == {key: execution[key] for key in keys}
+
+
+def test_nothing_the_receipt_claims_about_its_attestation_reaches_the_index():
+    # Only the enclave facts that checks 3 and 4 verified are ever shown.
+    statement = worked_example()
+    attestation = statement["predicate"]["execution"]["attestation"]
+    text = json.dumps(indexed(statement))
+    for value in (attestation["type"], attestation["measurement"], attestation["reportData"], attestation["quote"],
+                  attestation["referenceValue"]["repo"]):
+        assert value not in text
+    assert spec.PLACEHOLDER_PREFIX not in text
+
+
+def test_the_record_json_links_its_download_system_and_eval():
+    predicate = worked_example()["predicate"]
+    assert indexed()["links"] == {"download": f"/api/records/{'ab' * 32}/record.dsse.json",
+                                  "system": f"/api/systems/{predicate['system']['pipelineDigest']}",
+                                  "eval": f"/api/evals/{predicate['eval']['evalDigest']}"}

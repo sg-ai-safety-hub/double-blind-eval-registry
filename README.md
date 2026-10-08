@@ -4,8 +4,8 @@ A local web app that verifies and indexes AI-evaluation receipts for SASH's Four
 The design is described in the Google Doc *Building the Four Pillars Registry*.
 
 The registry runs seven checks on each submitted receipt, stores the exact bytes it received for each
-accepted receipt, and lists what it accepted. Work in progress: receipt ingestion works; the index,
-read API and UI are still being built.
+accepted receipt, and lists what it accepted. Work in progress: receipt ingestion, the index and the
+read API work; the UI is still being built.
 
 ## Receipts
 
@@ -59,6 +59,10 @@ uv run pytest                       # also the network tests (AMD via Tinfoil, S
 
 REGISTRY_MODE=dev uv run flask --app registry.app run --port 5050 --reload
 curl -X POST http://127.0.0.1:5050/api/records -F 'record=@fixtures/generated/sim_A.dsse.json'
+uv run python scripts/seed_dev.py   # POSTs every fixture dev mode accepts to the dev server
+
+REGISTRY_MODE=dev uv run python scripts/rebuild_index.py   # after editing the policy; then restart
+uv run python -m tests.demo_verified --out data/demo      # one verified record, with the Tinfoil SDK replaced
 
 cd web && pnpm install && pnpm dev  # UI at http://localhost:5173
 ```
@@ -70,6 +74,25 @@ cd web && pnpm install && pnpm dev  # UI at http://localhost:5173
   `benchmark_owners` lists the accepted benchmark-owner keys.
 - **Network.** Checks 3 and 4 need the network. If it can't be reached, the POST returns 503 and
   nothing is stored.
+- **Index.** The store (`data/<mode>/store`) holds the exact bytes of each accepted receipt; the index
+  (`data/<mode>/index.sqlite3`) is derived from it. The server refuses to start on an index built under
+  another policy or mode, and prints the `scripts/rebuild_index.py` command that rebuilds it.
 - **Localhost only.** Never run with `--host 0.0.0.0` or `--debug`.
+
+## API
+
+JSON on `http://127.0.0.1:5050`. Ids and digests in paths are 64 lowercase hex.
+
+| Endpoint | Returns |
+|---|---|
+| `POST /api/records` | Submit a receipt as the multipart file part `record`: 201 (accepted), 200 (already listed), or the refusal |
+| `GET /api/records?limit=20` | The newest records |
+| `GET /api/records/<id>` and `/api/records/<id>/record.dsse.json` | One record, and its exact bytes (sha256 = id) |
+| `GET /api/systems/<pipelineDigest>` | A system's components and records |
+| `GET /api/components/<digest>` | A component's roles, labels, systems and records |
+| `GET /api/models`, `GET /api/models/<digest>` | Models, by base weights digest |
+| `GET /api/evals`, `GET /api/evals/<evalDigest>` | Evals and their records |
+| `GET /api/lookup/<digest>` | What a digest names: system, eval, record, model or component |
+| `GET /api/health` | Mode, policy hash and version |
 
 Test fixtures are described in [fixtures/README.md](fixtures/README.md).

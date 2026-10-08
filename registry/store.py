@@ -57,6 +57,10 @@ class Store:
         raw = _read(self._folder(record_id) / META)
         return None if raw is None else json.loads(raw)
 
+    def record_ids(self) -> list[str]:
+        """The id of every stored record, sorted."""
+        return sorted(path.parent.parent.name + path.parent.name for path in self.root.glob(f"sha256/*/*/{RECORD}"))
+
     def _folder(self, record_id: str) -> Path:
         # Validating first also keeps any path outside the store unreachable.
         if not RECORD_ID.match(record_id):

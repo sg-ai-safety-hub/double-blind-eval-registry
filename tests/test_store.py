@@ -42,6 +42,15 @@ def test_storing_a_record_again_keeps_the_first_receipt_time(store):
     assert store.read_meta(RECORD_ID) == {"receivedAt": T0}
 
 
+def test_record_ids_lists_every_stored_record_in_order(store):
+    ids = [store.put_record(raw, T0) for raw in (RECORD, RECORD + b"\n", RECORD + b" ")]
+    assert store.record_ids() == sorted(ids)
+
+
+def test_an_empty_store_has_no_record_ids(store):
+    assert store.record_ids() == []
+
+
 def test_unknown_records_read_as_none(store):
     assert store.read_record(RECORD_ID) is None
     assert store.read_meta(RECORD_ID) is None
