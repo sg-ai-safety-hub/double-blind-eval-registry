@@ -7,7 +7,7 @@ here stops the app from starting rather than falling back to a default.
 import hashlib
 import logging
 import shutil
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -22,6 +22,7 @@ MODES = ("strict", "dev")
 DEFAULT_POLICY_PATHS = {"strict": Path("registry-policy.yaml"), "dev": Path("registry-policy.dev.yaml")}
 DEV_POLICY_EXAMPLE = Path("registry-policy.dev.example.yaml")
 DEBUG_ENV = "REGISTRY_DEBUG"
+EMAIL = r"^[^@\s]+@[^@\s]+$"  # one @, no whitespace: enough to catch a typo, not a validator
 
 
 class ConfigError(Exception):
@@ -40,8 +41,8 @@ class TrustedCode(_PolicyModel):
 
 
 class BenchmarkOwner(_PolicyModel):
-    # The Ed25519 key the receipt's benchmark-owner party carries, as 64 lowercase hex.
-    public_key: str = Field(pattern=spec.HEX64)
+    # An approver's email, which check 6 matches exactly. OpenMined verifies who owns it.
+    email: str = Field(pattern=EMAIL)
     display: str = Field(min_length=1)
 
 
@@ -51,11 +52,16 @@ class Policy(_PolicyModel):
 
     @field_validator("benchmark_owners")
     @classmethod
-    def _each_key_once(cls, owners: list[BenchmarkOwner]) -> list[BenchmarkOwner]:
-        keys = [owner.public_key for owner in owners]
-        if len(keys) != len(set(keys)):
-            raise ValueError("a public_key is listed more than once")
+    def _each_email_once(cls, owners: list[BenchmarkOwner]) -> list[BenchmarkOwner]:
+        emails = [owner.email for owner in owners]
+        if len(emails) != len(set(emails)):
+            raise ValueError("an email is listed more than once")
         return owners
+
+    def first_listed(self, emails: Iterable[str]) -> BenchmarkOwner | None:
+        """The list's entry for the first of `emails` on it, or None."""
+        listed = {owner.email: owner for owner in self.benchmark_owners}
+        return next((listed[email] for email in emails if email in listed), None)
 
 
 @dataclass(frozen=True)

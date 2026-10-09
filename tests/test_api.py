@@ -61,9 +61,11 @@ def test_strict_fixtures_get_their_expected_strict_status(strict, name):
 
 
 def test_refusals_are_json_with_error_and_detail(dev):
-    body = post(dev, record("C14_unlisted_bo")).get_json()
-    assert body["error"] == "Forbidden"
-    assert "not on this registry's list" in body["detail"]
+    body = post(dev, record("C6_unlisted_approver")).get_json()
+    assert body["error"] == "Unprocessable Entity"
+    assert body["detail"] == "failed: consent"
+    consent, = (c for c in body["checks"] if c["id"] == "consent")
+    assert consent["detail"] == "no approval from an email on this registry's list"
 
 
 def test_a_scripted_post_with_a_bundle_part_ignores_it_with_a_warning(dev):
@@ -80,8 +82,8 @@ def test_a_scripted_post_with_a_bundle_part_ignores_it_with_a_warning(dev):
 
 
 def test_the_bundle_warning_comes_with_refusals_too(dev):
-    response = dev.post("/api/records", data={"record": part(record("C14_unlisted_bo")), "bundle": "{}"})
-    assert response.status_code == 403
+    response = dev.post("/api/records", data={"record": part(record("C6_unlisted_approver")), "bundle": "{}"})
+    assert response.status_code == 422
     assert response.get_json()["warnings"] == [BUNDLE_IGNORED]
 
 
@@ -149,7 +151,8 @@ def test_a_network_failure_is_a_503_and_stores_nothing(dev, monkeypatch):
 
 # --- reads -------------------------------------------------------------------
 
-DEV_ACCEPTED = [name for name, entry in EXPECTED.items() if entry["dev"]["status"] == 201]
+# Every fixture dev mode accepts that verifies offline (om_receipt's checks 3 and 4 need the network).
+DEV_ACCEPTED = [name for name, entry in EXPECTED.items() if entry["dev"]["status"] == 201 and not entry.get("network")]
 ROUTES_WITH_AN_ID = ["/api/records/{}", "/api/records/{}/record.dsse.json", "/api/systems/{}", "/api/components/{}",
                      "/api/models/{}", "/api/evals/{}", "/api/lookup/{}"]
 
@@ -191,12 +194,11 @@ def test_a_limit_out_of_range_is_a_400(dev, limit):
 
 def test_the_read_endpoints_answer_from_the_index(seeded):
     d1 = seeded.get(f"/api/records/{EXPECTED['D1']['recordId']}").get_json()
-    weights, runtime = d1["components"][0], d1["components"][1]
-    runtime_hex = runtime["digest"].removeprefix("sha256:")  # an OCI digest
+    weights, sampling = d1["components"]  # the base model, then the sampling config
     assert seeded.get(f"/api/systems/{d1['systemDigest']}").get_json()["digest"] == d1["systemDigest"]
     assert seeded.get(f"/api/evals/{d1['eval']['digest']}").get_json()["names"] == [d1["eval"]["name"]]
     assert seeded.get(f"/api/models/{weights['digest']}").get_json()["names"] == [weights["name"]]
-    assert seeded.get(f"/api/components/{runtime_hex}").get_json()["names"] == [runtime["name"]]
+    assert seeded.get(f"/api/components/{sampling['digest']}").get_json()["names"] == [sampling["name"]]
     assert len(seeded.get("/api/models").get_json()["models"]) == 4
     assert len(seeded.get("/api/evals").get_json()["evals"]) == 4
     assert seeded.get(f"/api/lookup/{d1['systemDigest']}").get_json() == {"kind": "system", "id": d1["systemDigest"]}
@@ -218,8 +220,8 @@ def test_an_unknown_id_is_a_404(seeded, route):
     assert response.get_json()["detail"] == "nothing on file for that"
 
 
-def test_no_answer_shows_a_quote_sentinel(seeded):
-    # Their quotes are sentinels, and nothing from execution.attestation is ever shown.
+def test_no_answer_shows_a_report_sentinel(seeded):
+    # Their hardware reports are sentinels, and nothing from execution.attestation is ever shown.
     d1 = seeded.get(f"/api/records/{EXPECTED['D1']['recordId']}").get_json()
     pages = ["/api/records", "/api/models", "/api/evals", f"/api/systems/{d1['systemDigest']}",
              f"/api/evals/{d1['eval']['digest']}", f"/api/models/{d1['components'][0]['digest']}"]

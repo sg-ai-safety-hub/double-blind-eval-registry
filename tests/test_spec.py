@@ -8,9 +8,10 @@ import pytest
 from registry import spec
 
 ROOT = Path(__file__).resolve().parents[1]
+# BASE_MODEL_ROLE ("base") isn't guarded: it is a substring of too many unrelated words, such as base64.
 GUARDED = [
-    spec.PREDICATE_TYPE, spec.PREDICATE_VERSION, spec.PIPELINE_SCHEMA, spec.EVAL_SCHEMA, spec.PAYLOAD_TYPE,
-    spec.CONSENT_ALGORITHM, spec.CONSENT_PREFIX.decode(), spec.MODEL_OWNER, spec.BENCHMARK_OWNER,
+    spec.PREDICATE_TYPE, spec.PAYLOAD_TYPE, spec.KEY_BINDING_FORMAT, spec.REPORT_DATA_ALGORITHM,
+    spec.CRYPTO_MATERIAL_FORMAT, spec.SEV_SNP_REPORT_FORMAT, spec.SPKI_KEY_FORMAT, spec.SIGNING_KEY_ID,
     *spec.SENTINEL_PREFIXES,
 ]
 SOURCES = sorted(

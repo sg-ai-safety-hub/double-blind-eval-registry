@@ -2,8 +2,9 @@
 
 The SDK calls follow SecureClient's direct verification path: Document.verify, then
 verify_attestation and assert_equal. Intended deviations:
-- the report is the receipt's quote, not fetched from a live enclave;
+- the report is the receipt's keyBinding.cpu_evidence, not fetched from a live enclave;
 - the release is referenceValue.tag, not the latest, so refcache resolves the digest per tag;
+- the key binding is Tinfoil's report-data/v1, computed here: the Python SDK has no v3 support;
 - check 3 runs on its own, without check 4;
 - SEV-SNP only: no TDX branch.
 
@@ -30,9 +31,9 @@ from tuf.api.exceptions import DownloadError
 
 from registry import spec
 from registry.config import TrustedCode
-from registry.evalresult import Attestation, ReferenceValue
 from registry.model import Check, Enclave, Status, VerificationUnavailable, check
 from registry.refcache import NoReleaseAsset, RefCache
+from registry.syft_receipt import Attestation, KeyBinding, ReferenceValue
 
 log = logging.getLogger(__name__)
 
@@ -50,45 +51,64 @@ NETWORK_ERRORS = (  # these mean no verdict: VerificationUnavailable, so a 503
 NEEDS_CHECK_3 = "needs check 3, which failed"
 
 
-def check_attestation(attestation: Attestation, run_public_key: str, trusted_code: list[TrustedCode],
+def check_attestation(attestation: Attestation, trusted_code: list[TrustedCode],
                       refcache: RefCache) -> tuple[tuple[Check, Check, Check], Enclave | None]:
     """Checks 2, 3 and 4, and the verified enclave facts when checks 3 and 4 PASS.
 
     Check 3 runs first: checks 2 and 4 both need the report it verifies.
     """
+    report = attestation.keyBinding.cpu_evidence.report_base64
     if attestation.type != SEV_SNP:  # before the sentinel test: no report makes another type acceptable
         return _hardware_failed("SEV-SNP only in this MVP"), None
-    if attestation.quote.startswith(spec.SENTINEL_PREFIXES):
+    if report.startswith(spec.SENTINEL_PREFIXES):
         pending = "no hardware report in this receipt"  # the only absent input that allows PENDING
         return tuple(Check(check_id, Status.PENDING, pending) for check_id in HARDWARE_CHECKS), None
 
     try:
-        verification = _verify_report(attestation.quote)
+        verification = _verify_report(report)
     except Exception as e:
         _raise_if_network(e, "check 3")
         return _hardware_failed(f"the hardware report does not verify: {e}"), None
     hardware = Check("hardware", Status.PASS, "the report verifies against AMD's certificate chain and the SDK's TCB policy")
     measurement, enclave = _check_measurement(attestation.referenceValue, verification, trusted_code, refcache)
-    return (check_key_binding(run_public_key, verification), hardware, measurement), enclave
+    return (check_key_binding(attestation.keyBinding, verification), hardware, measurement), enclave
 
 
-def _verify_report(quote: str) -> Verification:
-    """Check 3. The quote is base64 of the raw report, but Document wants base64(gzip(report)).
+def _verify_report(report: str) -> Verification:
+    """Check 3. The report is base64 of the raw report, but Document wants base64(gzip(report)).
 
     No VCEK is passed: the SDK fetches it from Tinfoil's proxy of AMD's key server, validates it
     against AMD's roots, and keeps it in its own disk cache.
     """
-    raw = base64.b64decode(quote, validate=True)
+    raw = base64.b64decode(report, validate=True)
     body = base64.b64encode(gzip.compress(raw, mtime=0)).decode()
     return Document(format=PredicateType.SEV_GUEST_V2, body=body).verify()
 
 
 @check("key_binding")
-def check_key_binding(run_public_key: str, verification: Verification):
-    """Check 2: sha256 of runPublicKey's bytes is the verified report_data[0:32]."""
-    if hashlib.sha256(bytes.fromhex(run_public_key)).hexdigest() == verification.public_key_fp:
-        return Status.PASS, "sha256(runPublicKey) equals the attested report_data[0:32]"
-    return Status.FAIL, "sha256(runPublicKey) is not the key the hardware report binds"
+def check_key_binding(key_binding: KeyBinding, verification: Verification):
+    """Check 2: the verified report_data[0:32] is Tinfoil's report-data/v1 digest of this key binding.
+
+    crypto_material names the signing key that check 1 used, so a report committing to it binds that key.
+    The SDK exposes report_data[0:32] as public_key_fp.
+    """
+    if report_data(key_binding) == verification.public_key_fp:
+        return Status.PASS, "the attested report_data commits to crypto_material, and so to the signing key"
+    return Status.FAIL, "the hardware report does not commit to this receipt's crypto_material"
+
+
+def report_data(key_binding: KeyBinding) -> str:
+    """report-data/v1: SHA-256(algorithm || nonce || SHA-256(crypto_material) || SHA-256(device_evidence)).
+
+    Each section is hashed as its base64-decoded bytes. The schema pins the algorithm. The Python SDK
+    has no v3 support, so this follows the Go SDK's ComputeReportData:
+    https://github.com/tinfoilsh/tinfoil-go/blob/31c57af7d7b4fedf1724cb3552924dc6ecebf109/document/document.go#L294-L311
+    """
+    digest = hashlib.sha256(spec.REPORT_DATA_ALGORITHM.encode())
+    digest.update(bytes.fromhex(key_binding.challenge.nonce))
+    for section in (key_binding.crypto_material, key_binding.device_evidence):
+        digest.update(hashlib.sha256(base64.b64decode(section, validate=True)).digest())
+    return digest.hexdigest()
 
 
 def _check_measurement(reference_value: ReferenceValue, verification: Verification,

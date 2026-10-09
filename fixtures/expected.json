@@ -1,15 +1,35 @@
 {
+  "om_receipt": {
+    "record": "fixtures/openmined/receipt.dsse.json",
+    "recordId": "3bc3aabb8473df45e75ab91e624cca1a5588a3ff6e4a39215e7c0f6f8f96fd31",
+    "description": "OpenMined's receipt, as their enclave signed it",
+    "checks": {
+      "signature": "PASS",
+      "key_binding": "PASS",
+      "hardware": "PASS",
+      "measurement": "PASS",
+      "digests": "PASS",
+      "consent": "PASS"
+    },
+    "dev": {
+      "status": 201,
+      "state": "verified"
+    },
+    "network": true,
+    "strict": {
+      "status": 422
+    }
+  },
   "sim_A": {
     "record": "fixtures/generated/sim_A.dsse.json",
-    "recordId": "8653830ee4301c5de39a5bd79a4261a6095ad2a2944fa4bd4df2dbdbcfe6c77c",
-    "description": "Worked example, re-signed with fixture key A",
+    "recordId": "6673c53c6f1ea8d58efda19258d8faca6c7105ac120f95489f4a4af1ec44980f",
+    "description": "OpenMined's statement, simulated: fixture key A signs, and no hardware report",
     "checks": {
       "signature": "PASS",
       "key_binding": "PENDING",
       "hardware": "PENDING",
       "measurement": "PENDING",
       "digests": "PASS",
-      "publication": "N/A",
       "consent": "PASS"
     },
     "dev": {
@@ -20,44 +40,9 @@
       "status": 422
     }
   },
-  "sim_A_ec": {
-    "record": "fixtures/generated/sim_A_ec.dsse.json",
-    "recordId": "878949df5c86bb5e38b89c93f68852ca7414a9e4325b2752c140473278a35ee5",
-    "description": "Same statement; EC P-256 key; runPublicKey is SPKI DER hex",
-    "checks": {
-      "signature": "PASS",
-      "key_binding": "PENDING",
-      "hardware": "PENDING",
-      "measurement": "PENDING",
-      "digests": "PASS",
-      "publication": "N/A",
-      "consent": "PASS"
-    },
-    "dev": {
-      "status": 201,
-      "state": "incomplete"
-    }
-  },
-  "sim_A_noconsent": {
-    "record": "fixtures/generated/sim_A_noconsent.dsse.json",
-    "recordId": "afce87c52b6041f38715a07f7e18dfe282cd45f457bfc44d4dc2afbfc9a97764",
-    "description": "sim_A without consent, re-signed: no benchmark-owner approval for the gate",
-    "checks": {
-      "signature": "PASS",
-      "key_binding": "PENDING",
-      "hardware": "PENDING",
-      "measurement": "PENDING",
-      "digests": "PASS",
-      "publication": "N/A",
-      "consent": "N/A"
-    },
-    "dev": {
-      "status": 403
-    }
-  },
   "C1_edit_after_sign": {
     "record": "fixtures/generated/C1_edit_after_sign.dsse.json",
-    "recordId": "b0c75dfd475026625e1ad62007e84d3b68aab4ed54e0b54ec0ebcde1c2bde9d9",
+    "recordId": "61b9ca3d3b0bfdbcc7556e399d1a995930ba7506ed74e7fa1ab84cb42b7648bf",
     "description": "sim_A with subject[0].name changed after signing",
     "checks": {
       "signature": "FAIL",
@@ -65,7 +50,6 @@
       "hardware": "PENDING",
       "measurement": "PENDING",
       "digests": "PASS",
-      "publication": "N/A",
       "consent": "PASS"
     },
     "dev": {
@@ -74,15 +58,14 @@
   },
   "C2_other_signer": {
     "record": "fixtures/generated/C2_other_signer.dsse.json",
-    "recordId": "0c6c6f6c968539c2a182ca25413bd0d1a409a4355efe2462dfa08aea4d56fd9a",
-    "description": "Signed with key X, while runPublicKey names key Y",
+    "recordId": "e735d36c9403ffc1be388014f3e1aebcaefc3bd180a3e711937e923c5bfef91f",
+    "description": "crypto_material names key A, but key X signed",
     "checks": {
       "signature": "FAIL",
       "key_binding": "PENDING",
       "hardware": "PENDING",
       "measurement": "PENDING",
       "digests": "PASS",
-      "publication": "N/A",
       "consent": "PASS"
     },
     "dev": {
@@ -91,15 +74,14 @@
   },
   "C3_pipeline": {
     "record": "fixtures/generated/C3_pipeline.dsse.json",
-    "recordId": "97a40cddfd49910e1ebb398ae0b0221861e56468942b2f590413d863a83d6caf",
-    "description": "pipelineDigest altered, re-signed",
+    "recordId": "2b850721a7e4d85b98e01bb0674a2523eb26fb68e2b181475f66c3587c614bfb",
+    "description": "An evalPipeline model digest altered, the subject not, re-signed",
     "checks": {
       "signature": "PASS",
       "key_binding": "PENDING",
       "hardware": "PENDING",
       "measurement": "PENDING",
       "digests": "FAIL",
-      "publication": "N/A",
       "consent": "PASS"
     },
     "dev": {
@@ -108,168 +90,62 @@
   },
   "C4_subject": {
     "record": "fixtures/generated/C4_subject.dsse.json",
-    "recordId": "2efdb894c976bf23be456c450b965fd352830a5b08f137de5a37f7c3d1e56ba4",
-    "description": "Subject digest differs from pipelineDigest, re-signed",
+    "recordId": "196f35277f465996268fa612c0264453734cd0525be15b57d6024068cb1443e3",
+    "description": "Subject digest altered, re-signed",
     "checks": {
       "signature": "PASS",
       "key_binding": "PENDING",
       "hardware": "PENDING",
       "measurement": "PENDING",
       "digests": "FAIL",
-      "publication": "N/A",
       "consent": "PASS"
     },
     "dev": {
       "status": 422
     }
   },
-  "C5_eval": {
-    "record": "fixtures/generated/C5_eval.dsse.json",
-    "recordId": "2b3d816f5714fcb816d898a4401a8c5710da92ce7776b831f74844e16a58fadc",
-    "description": "evalDigest altered, re-signed",
+  "C5_p256_key": {
+    "record": "fixtures/generated/C5_p256_key.dsse.json",
+    "recordId": "acb2a93e2ccee427b39fe7299ee32c908a8335085a3fbe93c0b5312d3bcabe6c",
+    "description": "The enclave signing key is EC P-256, not Ed25519, and signs",
     "checks": {
-      "signature": "PASS",
+      "signature": "FAIL",
       "key_binding": "PENDING",
       "hardware": "PENDING",
       "measurement": "PENDING",
-      "digests": "FAIL",
-      "publication": "N/A",
+      "digests": "PASS",
       "consent": "PASS"
     },
     "dev": {
       "status": 422
     }
   },
-  "C6_consent_sig": {
-    "record": "fixtures/generated/C6_consent_sig.dsse.json",
-    "recordId": "551b6047757961cbb47f9498983e53ce54b520cf59406a2e905bfadfc8dda01b",
-    "description": "One approval signature altered, re-signed",
+  "C6_unlisted_approver": {
+    "record": "fixtures/generated/C6_unlisted_approver.dsse.json",
+    "recordId": "7b92e38531f8b73e2f96ad1898149e6ca11291c40b2d79eaf3c4f352f0a259b9",
+    "description": "Like sim_A, but no approval comes from an email on the dev list",
     "checks": {
       "signature": "PASS",
       "key_binding": "PENDING",
       "hardware": "PENDING",
       "measurement": "PENDING",
       "digests": "PASS",
-      "publication": "N/A",
       "consent": "FAIL"
     },
     "dev": {
       "status": 422
-    }
-  },
-  "C7_consent_party": {
-    "record": "fixtures/generated/C7_consent_party.dsse.json",
-    "recordId": "eb98fa520380b2bf1173060aa63fa02e4d4de8a88d4f2838cafd811687c523fe",
-    "description": "Approval by a key not listed in parties, re-signed",
-    "checks": {
-      "signature": "PASS",
-      "key_binding": "PENDING",
-      "hardware": "PENDING",
-      "measurement": "PENDING",
-      "digests": "PASS",
-      "publication": "N/A",
-      "consent": "FAIL"
-    },
-    "dev": {
-      "status": 422
-    }
-  },
-  "C7b_party_mismatch": {
-    "record": "fixtures/generated/C7b_party_mismatch.dsse.json",
-    "recordId": "24450cfdac6ea42aaec6fb9fa6337969dabd2565020c38aa9dcf7588936e965b",
-    "description": "Approval with party model-owner, signed by the benchmark-owner party's key, re-signed",
-    "checks": {
-      "signature": "PASS",
-      "key_binding": "PENDING",
-      "hardware": "PENDING",
-      "measurement": "PENDING",
-      "digests": "PASS",
-      "publication": "N/A",
-      "consent": "FAIL"
-    },
-    "dev": {
-      "status": 422
-    }
-  },
-  "C7c_one_party": {
-    "record": "fixtures/generated/C7c_one_party.dsse.json",
-    "recordId": "b826f8ffd951cc4e7828ab1e50e2ccc82e52bb255ef8652093b14f56f006d67e",
-    "description": "Only the model-owner approval present, re-signed",
-    "checks": {
-      "signature": "PASS",
-      "key_binding": "PENDING",
-      "hardware": "PENDING",
-      "measurement": "PENDING",
-      "digests": "PASS",
-      "publication": "N/A",
-      "consent": "FAIL"
-    },
-    "dev": {
-      "status": 422
-    }
-  },
-  "C7d_duplicate_approval": {
-    "record": "fixtures/generated/C7d_duplicate_approval.dsse.json",
-    "recordId": "eabc4ab9125af7b5b3b190717cca4a9804aae98b6a95b534901db03433b674c0",
-    "description": "The model-owner approval listed twice, re-signed",
-    "checks": {
-      "signature": "PASS",
-      "key_binding": "PENDING",
-      "hardware": "PENDING",
-      "measurement": "PENDING",
-      "digests": "PASS",
-      "publication": "N/A",
-      "consent": "FAIL"
-    },
-    "dev": {
-      "status": 422
-    }
-  },
-  "C7e_third_party_approval": {
-    "record": "fixtures/generated/C7e_third_party_approval.dsse.json",
-    "recordId": "cd6eba3e1ac908c554129dd1dc7b4e6adb7590a06ccec21b255b6e449c6eea3b",
-    "description": "Both owners' approvals plus a valid one from the compute party, re-signed",
-    "checks": {
-      "signature": "PASS",
-      "key_binding": "PENDING",
-      "hardware": "PENDING",
-      "measurement": "PENDING",
-      "digests": "PASS",
-      "publication": "N/A",
-      "consent": "FAIL"
-    },
-    "dev": {
-      "status": 422
-    }
-  },
-  "C14_unlisted_bo": {
-    "record": "fixtures/generated/C14_unlisted_bo.dsse.json",
-    "recordId": "cc27e94485d8ba9a7763299e52ff21df3d4c534881e967f582bc2f84c086590b",
-    "description": "Like sim_A, but the benchmark-owner party and its approval use a key not in the dev policy",
-    "checks": {
-      "signature": "PASS",
-      "key_binding": "PENDING",
-      "hardware": "PENDING",
-      "measurement": "PENDING",
-      "digests": "PASS",
-      "publication": "N/A",
-      "consent": "PASS"
-    },
-    "dev": {
-      "status": 403
     }
   },
   "stapled_B": {
     "record": "fixtures/generated/stapled_B.dsse.json",
-    "recordId": "f9948dd9f09d6eec96f50848d2dfa37d5ed0e24018202fbfd586e920294d019e",
-    "description": "Worked example with the live DBE report as its quote and the live release's tag, signed with key A",
+    "recordId": "7408b2028c2a60bc485c0d039fe165966f13a407714524e5ef87aaff18f1bef1",
+    "description": "OpenMined's statement with its real report, but crypto_material names fixture key B, which signs",
     "checks": {
       "signature": "PASS",
       "key_binding": "FAIL",
       "hardware": "PASS",
       "measurement": "PASS",
       "digests": "PASS",
-      "publication": "N/A",
       "consent": "PASS"
     },
     "dev": {
@@ -282,15 +158,14 @@
   },
   "C8_report_flip": {
     "record": "fixtures/generated/C8_report_flip.dsse.json",
-    "recordId": "f2c5de1ac863c91fc58795bad2dcf7c7ad403ec0e169d5547ce1065b04dd8cf7",
-    "description": "stapled_B with one measurement byte flipped in the raw report, re-signed",
+    "recordId": "1fe6b6f8be6af0240d4213513bffb35b03fcb7cc09f3df6be15def25f9bbc416",
+    "description": "stapled_B with one measurement byte flipped in the report",
     "checks": {
       "signature": "PASS",
       "key_binding": "FAIL",
       "hardware": "FAIL",
       "measurement": "FAIL",
       "digests": "PASS",
-      "publication": "N/A",
       "consent": "PASS"
     },
     "dev": {
@@ -298,17 +173,16 @@
     },
     "network": true
   },
-  "C9_garbage_quote": {
-    "record": "fixtures/generated/C9_garbage_quote.dsse.json",
-    "recordId": "59a3ad33af903a05af4f1cea6b07bf4aa5338548309881177a8408c180af3b74",
-    "description": "stapled_B with quote = base64 of random bytes (not a sentinel), re-signed",
+  "C9_garbage_report": {
+    "record": "fixtures/generated/C9_garbage_report.dsse.json",
+    "recordId": "89395342018adf27f94f8fb6eb527888839494d97af924a539c110ef115db11c",
+    "description": "stapled_B with report_base64 = base64 of random bytes (not a sentinel)",
     "checks": {
       "signature": "PASS",
       "key_binding": "FAIL",
       "hardware": "FAIL",
       "measurement": "FAIL",
       "digests": "PASS",
-      "publication": "N/A",
       "consent": "PASS"
     },
     "dev": {
@@ -317,15 +191,14 @@
   },
   "C11_untrusted_repo": {
     "record": "fixtures/generated/C11_untrusted_repo.dsse.json",
-    "recordId": "6c700322ab94789928b58f83dd1be4c2c30fca2640fa22a51246e8c1d78ff881",
-    "description": "The live router report, with referenceValue naming the router repo (not in trusted_code)",
+    "recordId": "4f58dd56b4c03ecfa4215351f92a40318c5b3d171cfc7787c78ea4eca1aa7968",
+    "description": "Tinfoil's live router report, with referenceValue naming the router repo (not in trusted_code)",
     "checks": {
       "signature": "PASS",
       "key_binding": "FAIL",
       "hardware": "PASS",
       "measurement": "FAIL",
       "digests": "PASS",
-      "publication": "N/A",
       "consent": "PASS"
     },
     "dev": {
@@ -335,15 +208,14 @@
   },
   "C12_repo_mismatch": {
     "record": "fixtures/generated/C12_repo_mismatch.dsse.json",
-    "recordId": "bd943ad4669d68f43e2ca66f66e6fe5fffb90ccc15110e2811be4cd03cc1612d",
-    "description": "The live router report, with referenceValue naming DBE and DBE's live tag",
+    "recordId": "bc1d4eef80790f95ffda209aaa000853ec312202e3cc912da4382bd30cd5df13",
+    "description": "Tinfoil's live router report, with referenceValue naming OpenMined's repo and tag",
     "checks": {
       "signature": "PASS",
       "key_binding": "FAIL",
       "hardware": "PASS",
       "measurement": "FAIL",
       "digests": "PASS",
-      "publication": "N/A",
       "consent": "PASS"
     },
     "dev": {
@@ -353,7 +225,7 @@
   },
   "C13_tag_missing": {
     "record": "fixtures/generated/C13_tag_missing.dsse.json",
-    "recordId": "475f78b454073ecdee5bb4c269527a17803743607125621d645c19054ca14ffe",
+    "recordId": "272d74c02bcc0b905900b3b72ae3c1779b4a11b4ddf6df129edf72a8a3198854",
     "description": "stapled_B with referenceValue.tag v0.0.0-does-not-exist: no release asset",
     "checks": {
       "signature": "PASS",
@@ -361,7 +233,6 @@
       "hardware": "PASS",
       "measurement": "FAIL",
       "digests": "PASS",
-      "publication": "N/A",
       "consent": "PASS"
     },
     "dev": {
@@ -371,7 +242,7 @@
   },
   "U1_predicate_type": {
     "record": "fixtures/generated/U1_predicate_type.dsse.json",
-    "recordId": "f20327eb82116e59b74c20ac3cba0b30810ec852d1de3744528b937e12bf77c4",
+    "recordId": "45129bd73d1f83df83e81462d6c78f2ead41bc7bd1db9ab88c43883ca66dabe4",
     "description": "predicateType changed, re-signed",
     "checks": null,
     "dev": {
@@ -380,7 +251,7 @@
   },
   "U2_payload_type": {
     "record": "fixtures/generated/U2_payload_type.dsse.json",
-    "recordId": "b49997fa343e0e03844fcf5ddf66068ed78bfc6176c9d34c84e5b434538ccf32",
+    "recordId": "587bcac6d797a538dad5d6c630422f9538d6b4beb6d7ec291e0e01bc306e6e2c",
     "description": "payloadType changed, re-signed",
     "checks": null,
     "dev": {
@@ -389,7 +260,7 @@
   },
   "U3_extra_field": {
     "record": "fixtures/generated/U3_extra_field.dsse.json",
-    "recordId": "b5d8832fb20123a602e2b33b49fa45b55e9fb10abb6b22d55dd39b00553ddc50",
+    "recordId": "1b09f2ec0df401411f82bdb3361dab58599edfbb30b921ed365d5748ca0bbf6e",
     "description": "Extra top-level statement field, re-signed",
     "checks": null,
     "dev": {
@@ -398,8 +269,8 @@
   },
   "U4_duplicate_key": {
     "record": "fixtures/generated/U4_duplicate_key.dsse.json",
-    "recordId": "f85f89a8ac6517bef4bfb8387153d3a939e435a29d0a256f034edc3e8c831474",
-    "description": "Statement with two predicateType keys (another type first, EvalResult last), signed",
+    "recordId": "1877d9adb7845a9d8a1abf91900f46a95c3233f17ca600831565a7836e5e6a8f",
+    "description": "Statement with two predicateType keys (another type first, the receipt's last), signed",
     "checks": null,
     "dev": {
       "status": 400
@@ -407,7 +278,7 @@
   },
   "U5_two_signatures": {
     "record": "fixtures/generated/U5_two_signatures.dsse.json",
-    "recordId": "d18033608d87a72a1ba72c8f34ee3483673d6582dc39f54c4b1bfcc9190ff4e7",
+    "recordId": "f6551b1e511d1f530ae5d8c7362d87ae4e58b33c45687b98230edefd0b914e84",
     "description": "sim_A's statement signed by two keys",
     "checks": null,
     "dev": {
@@ -423,46 +294,37 @@
       "status": 400
     }
   },
+  "U7_unsigned_statement": {
+    "record": "fixtures/openmined/sample-receipt.json",
+    "recordId": "0bcd509ffc1d5406c7d4f26450ceff298bc4b8bfb09e8d05ca906bea385c6bc0",
+    "description": "OpenMined's statement without its DSSE envelope",
+    "checks": null,
+    "dev": {
+      "status": 400
+    }
+  },
   "S1_no_reference_value": {
     "record": "fixtures/generated/S1_no_reference_value.dsse.json",
-    "recordId": "c5e6cb786127609cf15b1ab162a022bd78cb8413be0e571c009684266dc269aa",
+    "recordId": "318a0883b8284fa02f57472809d156045720e4b16b3cc2fc204ecccabfa4cad8",
     "description": "No referenceValue, re-signed",
     "checks": null,
     "dev": {
       "status": 422
     }
   },
-  "S2_worked_example_roles": {
-    "record": "fixtures/generated/S2_worked_example_roles.dsse.json",
-    "recordId": "36bff467f4dfa7af8744b6f1c21e8e797d67a32176a205f885d1d91cdf96bfa9",
-    "description": "The worked example's role names only (no model-owner or benchmark-owner), re-signed",
+  "S2_no_consent": {
+    "record": "fixtures/generated/S2_no_consent.dsse.json",
+    "recordId": "08366747dc1db04a3ed5b5e4332680b18b9f89d499fe0cccb3c34f825ed68a98",
+    "description": "No consent, re-signed",
     "checks": null,
     "dev": {
       "status": 422
     }
   },
-  "S3_two_benchmark_owners": {
-    "record": "fixtures/generated/S3_two_benchmark_owners.dsse.json",
-    "recordId": "0bf8b60e1833ae0471cd7e24cae3f899469d9ef16cbf060da18a6126bf4d1952",
-    "description": "Two benchmark-owner parties, re-signed",
-    "checks": null,
-    "dev": {
-      "status": 422
-    }
-  },
-  "S4_two_model_owners": {
-    "record": "fixtures/generated/S4_two_model_owners.dsse.json",
-    "recordId": "9895e56ea10a09491e61020e350bbcc570f8aa738058aa4fad6107b60d5f93a5",
-    "description": "Two model-owner parties, re-signed",
-    "checks": null,
-    "dev": {
-      "status": 422
-    }
-  },
-  "S5_same_owner_key": {
-    "record": "fixtures/generated/S5_same_owner_key.dsse.json",
-    "recordId": "414ffcfb09674b811ed033f624b271d93c56680f4727ced662786d7c5f19ad4b",
-    "description": "The model-owner party given the benchmark-owner party's key, re-signed",
+  "S3_no_signing_key": {
+    "record": "fixtures/generated/S3_no_signing_key.dsse.json",
+    "recordId": "e42bb260c77b17416c0d2af03bda8d9c9f6a035242a98eb48e501955d466208c",
+    "description": "sim_A with no enclave-signing-key in crypto_material, signed with key A",
     "checks": null,
     "dev": {
       "status": 422
@@ -470,7 +332,7 @@
   },
   "D1": {
     "record": "fixtures/generated/D1.dsse.json",
-    "recordId": "d8adb214c3fef4fa31e06a6100e6fc98a8ea1fcaca157c199bee86cd397827f4",
+    "recordId": "99f83e51180f26634af955f6655536e0dcb630a270ea445c47aacac104d68aba",
     "description": "Synthetic; two metrics",
     "checks": {
       "signature": "PASS",
@@ -478,7 +340,6 @@
       "hardware": "PENDING",
       "measurement": "PENDING",
       "digests": "PASS",
-      "publication": "N/A",
       "consent": "PASS"
     },
     "dev": {
@@ -488,15 +349,14 @@
   },
   "D2": {
     "record": "fixtures/generated/D2.dsse.json",
-    "recordId": "73058e6f5bec920c7d8135f1e9051371f330993db529838f68ebe7c46c51d3ad",
-    "description": "Synthetic; same system as D1, another eval; not scored",
+    "recordId": "a1f2f1693229d2fef2e8ad6a2a05840c2903e8bbe6b6056d0246bf63c25fd8f4",
+    "description": "Synthetic; same system as D1, another eval dataset; no metrics",
     "checks": {
       "signature": "PASS",
       "key_binding": "PENDING",
       "hardware": "PENDING",
       "measurement": "PENDING",
       "digests": "PASS",
-      "publication": "N/A",
       "consent": "PASS"
     },
     "dev": {
@@ -506,15 +366,14 @@
   },
   "D3": {
     "record": "fixtures/generated/D3.dsse.json",
-    "recordId": "0122046840a50293a41230e4866aaa080b662b8fa0369aa163090e3eec070de6",
-    "description": "Synthetic; D1's model behind a safeguard",
+    "recordId": "abed45048fcca12968897f1f97696aaf5f4fb2eaab3e5f13e451ed6f0e7b9a13",
+    "description": "Synthetic; D1's model with an adapter",
     "checks": {
       "signature": "PASS",
       "key_binding": "PENDING",
       "hardware": "PENDING",
       "measurement": "PENDING",
       "digests": "PASS",
-      "publication": "N/A",
       "consent": "PASS"
     },
     "dev": {
@@ -524,15 +383,14 @@
   },
   "D4": {
     "record": "fixtures/generated/D4.dsse.json",
-    "recordId": "9458e9ca694fd21a2b5f2437721229cf91dd281e31629e29194234cf33c507c7",
-    "description": "Synthetic; a second base model; scored, but no metrics reported",
+    "recordId": "ae818d11e00715f5a702e8e0ac40cd721c2bda75eab1b08d2fa948a586720696",
+    "description": "Synthetic; a second base model",
     "checks": {
       "signature": "PASS",
       "key_binding": "PENDING",
       "hardware": "PENDING",
       "measurement": "PENDING",
       "digests": "PASS",
-      "publication": "N/A",
       "consent": "PASS"
     },
     "dev": {
@@ -542,15 +400,14 @@
   },
   "D5": {
     "record": "fixtures/generated/D5.dsse.json",
-    "recordId": "abc4305cb594c1b2518877dfab03097a89800bf1689c169ef6bd1000ae7a3694",
-    "description": "Synthetic; two adapter components (sort tie-break)",
+    "recordId": "b8539e215d46f84372dd4a4852c69b656e3dd3fc185e4e97c405b176e7b72d34",
+    "description": "Synthetic; metrics incl. a non-{name,value,unit} item; hf-revision alias A",
     "checks": {
       "signature": "PASS",
       "key_binding": "PENDING",
       "hardware": "PENDING",
       "measurement": "PENDING",
       "digests": "PASS",
-      "publication": "N/A",
       "consent": "PASS"
     },
     "dev": {
@@ -560,15 +417,14 @@
   },
   "D6": {
     "record": "fixtures/generated/D6.dsse.json",
-    "recordId": "13c09eeb11de055e97981ba699428fbaf4d4ad256da83a604c41a594ecae656f",
-    "description": "Synthetic; metrics incl. a non-{name,value} item; oms/1 alias A",
+    "recordId": "24f17f2cd3d8597e0a75634baa94a86eeb7f785b3634880bc59c73afa9358017",
+    "description": "Synthetic; same weights as D5 with a conflicting hf-revision alias",
     "checks": {
       "signature": "PASS",
       "key_binding": "PENDING",
       "hardware": "PENDING",
       "measurement": "PENDING",
       "digests": "PASS",
-      "publication": "N/A",
       "consent": "PASS"
     },
     "dev": {
@@ -578,25 +434,7 @@
   },
   "D7": {
     "record": "fixtures/generated/D7.dsse.json",
-    "recordId": "591a52903637b37028ebccb9ba3d130b4eb30e38f19f086091ba673776d539d7",
-    "description": "Synthetic; same weights as D6 with a conflicting oms/1 alias",
-    "checks": {
-      "signature": "PASS",
-      "key_binding": "PENDING",
-      "hardware": "PENDING",
-      "measurement": "PENDING",
-      "digests": "PASS",
-      "publication": "N/A",
-      "consent": "PASS"
-    },
-    "dev": {
-      "status": 201,
-      "state": "incomplete"
-    }
-  },
-  "D8": {
-    "record": "fixtures/generated/D8.dsse.json",
-    "recordId": "b336d4ce430367b5d031533596ffc041d8bac8b52ea2123165550256b6ceb122",
+    "recordId": "57da215ab426efd35e014232d938f50cf9f2ec5b68929c387d7a10629defa47a",
     "description": "Synthetic; a component named <script>alert(1)</script>",
     "checks": {
       "signature": "PASS",
@@ -604,7 +442,6 @@
       "hardware": "PENDING",
       "measurement": "PENDING",
       "digests": "PASS",
-      "publication": "N/A",
       "consent": "PASS"
     },
     "dev": {

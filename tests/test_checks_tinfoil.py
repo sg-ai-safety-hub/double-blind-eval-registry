@@ -2,8 +2,10 @@
 test_live.py runs the same path against the live captures."""
 
 import base64
+import copy
 import gzip
-import hashlib
+import json
+from pathlib import Path
 
 import pytest
 import requests
@@ -15,37 +17,42 @@ from tuf.api.exceptions import DownloadError
 from registry import checks_tinfoil, spec
 from registry.checks_tinfoil import check_attestation
 from registry.config import TrustedCode
-from registry.evalresult import Attestation
 from registry.model import Check, Enclave, Status, VerificationUnavailable
 from registry.refcache import NoReleaseAsset, Reference
+from registry.syft_receipt import Attestation
 
+OPENMINED = Path(__file__).resolve().parents[1] / "fixtures/openmined/receipt.dsse.json"
 HARDWARE_CHECKS = ["key_binding", "hardware", "measurement"]
-REPO = "tinfoilsh/double-blind-eval"
-TAG = "v0.0.4"
+REPO = "OpenMined/syft-enclave-tinfoil"
+TAG = "v0.1.28"
 TRUSTED = [TrustedCode(repo=REPO)]
-RUN_KEY = "ab" * 32
 REPORT = b"a raw SEV-SNP report"
+# OpenMined's key binding, and the report_data[0:32] that Tinfoil's code put in its hardware report: a test vector.
+KEY_BINDING = json.loads(base64.b64decode(json.loads(OPENMINED.read_bytes())["payload"]))[
+    "predicate"]["execution"]["attestation"]["keyBinding"]
+REPORT_DATA = KEY_BINDING["challenge"]["report_data"][:64]
 MEASUREMENT = "6d" * 48
 DIGEST = "fe" * 32
 REFERENCE = Reference(digest=DIGEST, hash_file=DIGEST.encode() + b"\n", bundle=b"{}", cached=False)
 DEPENDENT = "needs check 3, which failed"
 
 
-def attestation(quote: str = base64.b64encode(REPORT).decode(), type_: str = "sev-snp", repo: str = REPO,
-                tag: str = TAG) -> Attestation:
+def attestation(report: str = base64.b64encode(REPORT).decode(), type_: str = "sev-snp", repo: str = REPO,
+                tag: str = TAG, **key_binding) -> Attestation:
+    """OpenMined's attestation with `report` as its hardware report, and any keyBinding fields replaced."""
+    binding = {**copy.deepcopy(KEY_BINDING), **key_binding}
+    binding["cpu_evidence"]["report_base64"] = report
     return Attestation.model_validate({
         "type": type_,
-        "quote": quote,
-        "measurement": "unused",
-        "reportData": "unused",
         "referenceValue": {"source": spec.REFERENCE_SOURCE, "repo": spec.REFERENCE_REPO_PREFIX + repo, "tag": tag},
+        "keyBinding": binding,
     })
 
 
-def verification(key_hex: str = RUN_KEY, measurement: str = MEASUREMENT) -> Verification:
-    """What Document.verify returns for a report binding `key_hex` and measuring `measurement`."""
+def verification(report_data: str = REPORT_DATA, measurement: str = MEASUREMENT) -> Verification:
+    """What Document.verify returns for a report whose report_data[0:32] is `report_data`."""
     return Verification(measurement=Measurement(type=PredicateType.SEV_GUEST_V2, registers=[measurement]),
-                        public_key_fp=hashlib.sha256(bytes.fromhex(key_hex)).hexdigest())
+                        public_key_fp=report_data)
 
 
 def signed_reference(measurement: str = MEASUREMENT) -> Measurement:
@@ -89,8 +96,8 @@ def sdk(monkeypatch):
     return calls
 
 
-def run(att: Attestation | None = None, cache: FakeRefCache | None = None, run_key: str = RUN_KEY):
-    return check_attestation(att or attestation(), run_key, TRUSTED, cache or FakeRefCache())
+def run(att: Attestation | None = None, cache: FakeRefCache | None = None):
+    return check_attestation(att or attestation(), TRUSTED, cache or FakeRefCache())
 
 
 def statuses(checks) -> list:
@@ -100,24 +107,24 @@ def statuses(checks) -> list:
 # --- PENDING and the attestation type ------------------------------------------
 
 @pytest.mark.parametrize("prefix", spec.SENTINEL_PREFIXES)
-def test_a_sentinel_quote_leaves_checks_2_to_4_pending(prefix, sdk):
-    checks, enclave = run(attestation(quote=prefix + "anything"))
+def test_a_sentinel_report_leaves_checks_2_to_4_pending(prefix, sdk):
+    checks, enclave = run(attestation(report=prefix + "anything"))
     assert [(c.id, c.status, c.detail) for c in checks] == [
         (check_id, Status.PENDING, "no hardware report in this receipt") for check_id in HARDWARE_CHECKS]
     assert enclave is None
     assert sdk["documents"] == []
 
 
-@pytest.mark.parametrize("quote", ["AAAA" + spec.SIMULATED_PREFIX, spec.SIMULATED_PREFIX.lower() + "x"],
+@pytest.mark.parametrize("report", ["AAAA" + spec.SIMULATED_PREFIX, spec.SIMULATED_PREFIX.lower() + "x"],
                          ids=["not-a-prefix", "lowercase"])
-def test_only_a_sentinel_prefix_counts_as_no_report(quote, sdk):
-    checks, _ = run(attestation(quote=quote))
+def test_only_a_sentinel_prefix_counts_as_no_report(report, sdk):
+    checks, _ = run(attestation(report=report))
     assert statuses(checks) == [("key_binding", Status.FAIL), ("hardware", Status.FAIL), ("measurement", Status.FAIL)]
 
 
-@pytest.mark.parametrize("quote", ["AAAA", spec.SIMULATED_PREFIX + "anything"], ids=["real", "sentinel"])
-def test_any_type_but_sev_snp_fails_check_3_even_without_a_report(quote, sdk):
-    checks, enclave = run(attestation(quote=quote, type_="tdx"))
+@pytest.mark.parametrize("report", ["AAAA", spec.SIMULATED_PREFIX + "anything"], ids=["real", "sentinel"])
+def test_any_type_but_sev_snp_fails_check_3_even_without_a_report(report, sdk):
+    checks, enclave = run(attestation(report=report, type_="tdx"))
     assert [(c.id, c.status, c.detail) for c in checks] == [
         ("key_binding", Status.FAIL, DEPENDENT),
         ("hardware", Status.FAIL, "SEV-SNP only in this MVP"),
@@ -130,7 +137,7 @@ def test_any_type_but_sev_snp_fails_check_3_even_without_a_report(quote, sdk):
 # --- check 3: hardware -----------------------------------------------------------
 
 def test_the_sdk_gets_the_raw_report_gzipped(sdk):
-    # The quote is base64 of the raw report, but Document wants base64(gzip(report)).
+    # The report is base64 of the raw report, but Document wants base64(gzip(report)).
     run()
     document, = sdk["documents"]
     assert document.format is PredicateType.SEV_GUEST_V2
@@ -143,9 +150,9 @@ def test_a_verified_report_passes_check_3(sdk):
         "hardware", Status.PASS, "the report verifies against AMD's certificate chain and the SDK's TCB policy")
 
 
-@pytest.mark.parametrize("quote", ["not base64!", base64.b64encode(REPORT).decode() + "!"])
-def test_a_quote_that_is_not_standard_base64_fails_check_3(quote, sdk):
-    checks, enclave = run(attestation(quote=quote))
+@pytest.mark.parametrize("report", ["not base64!", base64.b64encode(REPORT).decode() + "!"])
+def test_a_report_that_is_not_standard_base64_fails_check_3(report, sdk):
+    checks, enclave = run(attestation(report=report))
     assert statuses(checks) == [("key_binding", Status.FAIL), ("hardware", Status.FAIL), ("measurement", Status.FAIL)]
     assert enclave is None
     assert sdk["documents"] == []
@@ -167,25 +174,35 @@ def test_a_report_the_sdk_rejects_fails_check_3_and_so_checks_2_and_4(sdk):
 
 # --- check 2: key binding ---------------------------------------------------------
 
-def test_key_binding_passes_when_report_data_binds_the_run_key(sdk):
-    # The check-2 glue: Document.verify returns Verification(public_key_fp=sha256(key)).
+def test_key_binding_passes_when_report_data_commits_to_this_key_binding(sdk):
+    # Tinfoil's report-data/v1 over OpenMined's nonce, crypto_material and device_evidence.
     checks, _ = run()
-    assert checks[0].status is Status.PASS
+    assert checks[0] == Check("key_binding", Status.PASS,
+                              "the attested report_data commits to crypto_material, and so to the signing key")
 
 
-def test_key_binding_fails_for_any_other_key(sdk):
-    sdk["verification"] = verification(key_hex="cd" * 32)
-    checks, _ = run()
+def reencoded(field: str) -> str:
+    """OpenMined's section, with the same JSON content but other bytes."""
+    return base64.b64encode(base64.b64decode(KEY_BINDING[field]) + b" ").decode()
+
+
+@pytest.mark.parametrize("changes", [
+    {"crypto_material": reencoded("crypto_material")},
+    {"device_evidence": reencoded("device_evidence")},
+    {"challenge": {**KEY_BINDING["challenge"], "nonce": "00" * 32}},
+], ids=["crypto-material", "device-evidence", "nonce"])
+def test_key_binding_fails_when_any_input_to_report_data_differs(sdk, changes):
+    # The bytes count, not just the JSON they decode to: a hardware report commits to exact bytes.
+    checks, _ = run(attestation(**changes))
     assert (checks[0].status, checks[0].detail) == (
-        Status.FAIL, "sha256(runPublicKey) is not the key the hardware report binds")
-    assert checks[1].status is checks[2].status is Status.PASS  # a stapled report: checks 3 and 4 still PASS
+        Status.FAIL, "the hardware report does not commit to this receipt's crypto_material")
 
 
-def test_key_binding_hashes_the_key_bytes_not_the_hex(sdk):
-    sdk["verification"] = Verification(measurement=verification().measurement,
-                                       public_key_fp=hashlib.sha256(RUN_KEY.encode()).hexdigest())
+def test_a_stapled_report_fails_check_2_but_passes_checks_3_and_4(sdk):
+    sdk["verification"] = verification(report_data="cd" * 32)  # a real report, bound to some other key binding
     checks, _ = run()
     assert checks[0].status is Status.FAIL
+    assert checks[1].status is checks[2].status is Status.PASS
 
 
 # --- check 4: measurement --------------------------------------------------------------

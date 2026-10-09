@@ -11,30 +11,30 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 
-from registry import checks_software, checks_tinfoil, evalresult, policy, spec
+from registry import checks_software, checks_tinfoil, policy, syft_receipt
 from registry.config import Config, Policy
 from registry.envelope import Receipt, Unrecognized, parse_receipt
-from registry.evalresult import TIMESTAMP_FORMAT, SchemaError, Statement, parse_statement
 from registry.index import Index, IndexedRecord
 from registry.model import Accepted, IngestResult, VerificationResult, VerificationUnavailable
 from registry.refcache import RefCache
 from registry.store import Corrupt, Store
+from registry.syft_receipt import SchemaError, Statement, parse_statement
 
 log = logging.getLogger(__name__)
 
+TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%SZ"  # receivedAt: RFC 3339, UTC, second precision
+
 
 def verify(receipt: Receipt, statement: Statement, trust: Policy, refcache: RefCache) -> VerificationResult:
-    """Checks 1-7, in order. Raises VerificationUnavailable on a network error."""
+    """Checks 1-6, in order. Raises VerificationUnavailable on a network error."""
     predicate = statement.predicate
-    execution = predicate.execution
-    hardware, enclave = checks_tinfoil.check_attestation(execution.attestation, execution.runPublicKey,
-                                                         trust.trusted_code, refcache)
+    attestation = predicate.execution.attestation
+    hardware, enclave = checks_tinfoil.check_attestation(attestation, trust.trusted_code, refcache)
     checks = (
-        checks_software.check_signature(receipt.envelope, execution.runPublicKey),
+        checks_software.check_signature(receipt.envelope, attestation.keyBinding.signing_key),
         *hardware,
-        checks_software.check_digests(statement),
-        checks_software.check_publication(),
-        checks_software.check_consent(predicate),
+        checks_software.check_digests(receipt.statement),  # the statement as parsed: every field counts
+        checks_software.check_consent(predicate.consent, trust),
     )
     return VerificationResult(checks, enclave)
 
@@ -59,16 +59,15 @@ def assess(raw: bytes, config: Config, refcache: RefCache, received_at: str) -> 
     checks = result.checks
     for c in checks:
         log.debug("record %s: %s %s (%s)", record_id, c.id, c.status, c.detail)
-    # The acceptance gate matches the benchmark owner's key, not the model owner's: the registry lists
-    # evaluations run by benchmark owners on its list. The model owner's key only counts in check 7.
-    owner_key = statement.predicate.owner_key(spec.BENCHMARK_OWNER)
-    decision = policy.decide(config.mode, config.policy, owner_key, checks)
+    approvers = [approval.party for approval in statement.predicate.consent.approvals]
+    decision = policy.decide(config.mode, config.policy, approvers, checks)
     if decision.state is None:
         return IngestResult(decision.status, {"recordId": record_id, "checks": [asdict(c) for c in checks],
-                                              "benchmarkOwner": {"publicKey": owner_key}, "detail": decision.detail})
+                                              "detail": decision.detail})
     accepted = Accepted(record_id=record_id, size=len(raw), received_at=received_at, state=decision.state,
-                        checks=checks, enclave=result.enclave, benchmark_owner_display=decision.display)
-    return evalresult.to_index(statement, accepted)
+                        checks=checks, enclave=result.enclave, benchmark_owner_email=decision.owner.email,
+                        benchmark_owner_display=decision.owner.display)
+    return syft_receipt.to_index(statement, accepted)
 
 
 def ingest(raw: bytes, config: Config, store: Store, index: Index, refcache: RefCache) -> IngestResult:
