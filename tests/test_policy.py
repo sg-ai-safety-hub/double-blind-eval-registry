@@ -1,4 +1,4 @@
-"""Acceptance, on check vectors written like "PFPPPP" (one letter per check, 1-6)."""
+"""Acceptance, on check vectors written like "PFPPPPP" (one letter per check, 1-7)."""
 
 import pytest
 
@@ -29,33 +29,34 @@ def outcome(mode: str, vector: str, approvers: list[str] = APPROVERS) -> tuple:
 
 @pytest.mark.parametrize("mode", MODES)
 def test_everything_passing_is_verified_and_names_the_listed_approver(mode):
-    assert outcome(mode, "PPPPPP") == (201, "", "verified", (LISTED, "Listed owner"))
+    assert outcome(mode, "PPPPPPP") == (201, "", "verified", (LISTED, "Listed owner"))
 
 
-def test_pending_hardware_checks_are_incomplete_in_dev():
-    assert outcome("dev", "P---PP") == (201, "", "incomplete", (LISTED, "Listed owner"))
+def test_pending_hardware_and_publication_checks_are_incomplete_in_dev():
+    assert outcome("dev", "P---PP-") == (201, "", "incomplete", (LISTED, "Listed owner"))
 
 
-def test_pending_hardware_checks_are_refused_in_strict():
-    assert outcome("strict", "P---PP") == (422, DEV_ONLY, None, None)
+def test_pending_hardware_and_publication_checks_are_refused_in_strict():
+    assert outcome("strict", "P---PP-") == (422, DEV_ONLY, None, None)
 
 
 @pytest.mark.parametrize("mode", MODES)
 @pytest.mark.parametrize("vector, failed", [
-    ("F---PP", "signature"),
-    ("PFPPPP", "key_binding"),
-    ("P---FF", "digests, consent"),
-    ("PPPPPF", "consent"),  # no approval from a listed email
+    ("F---PP-", "signature"),
+    ("PFPPPPP", "key_binding"),
+    ("P---FF-", "digests, consent"),
+    ("PPPPPFP", "consent"),  # no approval from a listed email
+    ("PPPPPPF", "publication"),  # not on Rekor
 ])
 def test_any_fail_is_refused_in_both_modes(mode, vector, failed):
     assert outcome(mode, vector) == (422, f"failed: {failed}", None, None)
 
 
 def test_a_fail_comes_before_pending_in_strict():
-    assert outcome("strict", "F---PP")[:2] == (422, "failed: signature")
+    assert outcome("strict", "F---PP-")[:2] == (422, "failed: signature")
 
 
-@pytest.mark.parametrize("vector", ["P-PPPP", "-PPPPP", "PPPP-P"])
+@pytest.mark.parametrize("vector", ["P-PPPPP", "-PPPPPP", "PPPP-PP", "PPPPPP-", "P---PPP"])
 def test_any_other_combination_is_refused(vector):
     # Fail closed: accept only the exact verified and incomplete vectors.
     assert outcome("dev", vector) == (422, "unexpected check results", None, None)
@@ -63,4 +64,4 @@ def test_any_other_combination_is_refused(vector):
 
 def test_a_passed_consent_check_with_no_listed_approver_is_refused():
     # Can't happen, as check 6 PASSes only for a listed approver; if it ever did, fail closed.
-    assert outcome("dev", "PPPPPP", ["unlisted@example.org"]) == (422, "unexpected check results", None, None)
+    assert outcome("dev", "PPPPPPP", ["unlisted@example.org"]) == (422, "unexpected check results", None, None)

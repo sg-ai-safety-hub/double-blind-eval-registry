@@ -26,7 +26,7 @@ log = logging.getLogger(__name__)
 
 TRUSTED_HOSTS = ["localhost", "127.0.0.1"]  # rejects other Host headers: stops DNS rebinding
 MAX_BODY_BYTES = 1024 * 1024  # 1 MiB
-BUNDLE_IGNORED = "bundle ignored: publication is not verified in this version"
+BUNDLE_IGNORED = "bundle ignored: check 7 looks the receipt up on Rekor"
 NOT_FOUND = "nothing on file for that"
 DEFAULT_LIMIT, MAX_LIMIT = 20, 100  # recent records
 

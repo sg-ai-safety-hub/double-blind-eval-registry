@@ -30,7 +30,14 @@ OCI_SCHEME = "oci/1"  # its digests are "sha256:" + 64 hex; every other scheme's
 REFERENCE_SOURCE = "sigstore"  # the only referenceValue.source accepted
 REFERENCE_REPO_PREFIX = "github.com/"  # referenceValue.repo is github.com/<owner>/<name>
 
-# A hardware report starting with one of these counts as absent, so checks 2-4 are PENDING.
+# A hardware report starting with one of these counts as absent, so checks 2-4 and 7 are PENDING.
 SIMULATED_PREFIX = "SIMULATED-"  # written by a simulated enclave
 PLACEHOLDER_PREFIX = "PLACEHOLDER-"
 SENTINEL_PREFIXES = (SIMULATED_PREFIX, PLACEHOLDER_PREFIX)
+
+# Check 7: OpenMined logs each receipt on Rekor v1, Sigstore's public transparency log, as a dsse entry
+# whose verifier is the enclave signing key.
+REKOR_URL = "https://rekor.sigstore.dev"
+REKOR_ENTRY_KIND = "dsse"
+REKOR_ENTRY_API_VERSION = "0.0.1"
+REKOR_SEARCH_LINK = "https://search.sigstore.dev/?logIndex={}"  # one entry, for people to look at

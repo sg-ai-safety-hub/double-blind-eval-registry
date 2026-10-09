@@ -11,12 +11,12 @@ from pathlib import Path
 import pytest
 from fixture_data import CHECKED, DEV_POLICY, EXPECTED, STRICT_POLICY, params, record
 
-from registry import checks_tinfoil
+from registry import checks_publication, checks_tinfoil, spec
 from registry.config import load_config
 from registry.envelope import parse_receipt
 from registry.index import Index
 from registry.ingest import TIMESTAMP_FORMAT, ingest, rebuild, verify
-from registry.model import CHECK_IDS, Check, Enclave, Status, VerificationUnavailable
+from registry.model import CHECK_IDS, Check, Enclave, Publication, Status, VerificationUnavailable
 from registry.refcache import RefCache
 from registry.store import Store
 from registry.syft_receipt import parse_statement
@@ -152,6 +152,13 @@ def hardware(status: Status, enclave: Enclave | None = None):
     return check_attestation
 
 
+def published(publication: Publication):
+    """A stand-in for check 7 that PASSes with these facts."""
+    def check_publication(receipt, key_binding):
+        return Check("publication", Status.PASS, "stand-in"), publication
+    return check_publication
+
+
 def test_a_network_failure_during_the_checks_is_a_503_and_stores_nothing(store, index, refcache, monkeypatch):
     def unavailable(*args):
         raise VerificationUnavailable("check 3 could not reach the network: connection refused")
@@ -165,19 +172,36 @@ def test_a_network_failure_during_the_checks_is_a_503_and_stores_nothing(store, 
     assert index.recent(100) == []
 
 
-def test_a_verified_answer_carries_the_verified_enclave_facts(store, index, refcache, monkeypatch):
+def test_a_verified_answer_carries_the_verified_enclave_and_publication_facts(store, index, refcache, monkeypatch):
     enclave = Enclave(measurement="33" * 48, repo="OpenMined/syft-enclave-tinfoil", release_tag="v0.1.28",
                       release_digest="74" * 32)
+    publication = Publication(uuid="10" * 40, log_index=3129204433, integrated_time=1791368875,
+                              url=spec.REKOR_SEARCH_LINK.format(3129204433))
     monkeypatch.setattr(checks_tinfoil, "check_attestation", hardware(Status.PASS, enclave))
+    monkeypatch.setattr(checks_publication, "check_publication", published(publication))
     body = ingest(record("sim_A"), config("dev"), store, index, refcache).body
     assert body["state"] == "verified"
     assert body["enclave"] == {"type": "AMD SEV-SNP", "measurement": "33" * 48,
                                "repo": "OpenMined/syft-enclave-tinfoil", "releaseTag": "v0.1.28",
                                "releaseDigest": "74" * 32}
+    assert body["publication"] == {"uuid": "10" * 40, "logIndex": 3129204433, "integratedTime": 1791368875,
+                                   "url": spec.REKOR_SEARCH_LINK.format(3129204433)}
 
 
-def test_an_incomplete_answer_has_no_enclave_facts(store, index, refcache):
-    assert ingest(record("sim_A"), config("dev"), store, index, refcache).body["enclave"] is None
+def test_an_incomplete_answer_has_no_enclave_or_publication_facts(store, index, refcache):
+    body = ingest(record("sim_A"), config("dev"), store, index, refcache).body
+    assert (body["enclave"], body["publication"]) == (None, None)
+
+
+def test_a_network_failure_during_check_7_is_a_503_and_stores_nothing(store, index, refcache, monkeypatch):
+    def unavailable(*args):
+        raise VerificationUnavailable("check 7 could not reach the network: connection refused")
+    monkeypatch.setattr(checks_tinfoil, "check_attestation", hardware(Status.PASS))
+    monkeypatch.setattr(checks_publication, "check_publication", unavailable)
+    result = ingest(record("sim_A"), config("dev"), store, index, refcache)
+    assert (result.status, result.body["detail"]) == (
+        503, "verification unavailable, try again later: check 7 could not reach the network: connection refused")
+    assert not store.root.exists()
 
 
 # --- rebuild -----------------------------------------------------------------

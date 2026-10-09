@@ -11,7 +11,7 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 
-from registry import checks_software, checks_tinfoil, policy, syft_receipt
+from registry import checks_publication, checks_software, checks_tinfoil, policy, syft_receipt
 from registry.config import Config, Policy
 from registry.envelope import Receipt, Unrecognized, parse_receipt
 from registry.index import Index, IndexedRecord
@@ -26,17 +26,19 @@ TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%SZ"  # receivedAt: RFC 3339, UTC, second pre
 
 
 def verify(receipt: Receipt, statement: Statement, trust: Policy, refcache: RefCache) -> VerificationResult:
-    """Checks 1-6, in order. Raises VerificationUnavailable on a network error."""
+    """Checks 1-7, in order. Raises VerificationUnavailable on a network error."""
     predicate = statement.predicate
     attestation = predicate.execution.attestation
     hardware, enclave = checks_tinfoil.check_attestation(attestation, trust.trusted_code, refcache)
+    publication, published = checks_publication.check_publication(receipt, attestation.keyBinding)
     checks = (
         checks_software.check_signature(receipt.envelope, attestation.keyBinding.signing_key),
         *hardware,
         checks_software.check_digests(receipt.statement),  # the statement as parsed: every field counts
         checks_software.check_consent(predicate.consent, trust),
+        publication,
     )
-    return VerificationResult(checks, enclave)
+    return VerificationResult(checks, enclave, published)
 
 
 def assess(raw: bytes, config: Config, refcache: RefCache, received_at: str) -> IngestResult | IndexedRecord:
@@ -65,7 +67,8 @@ def assess(raw: bytes, config: Config, refcache: RefCache, received_at: str) -> 
         return IngestResult(decision.status, {"recordId": record_id, "checks": [asdict(c) for c in checks],
                                               "detail": decision.detail})
     accepted = Accepted(record_id=record_id, size=len(raw), received_at=received_at, state=decision.state,
-                        checks=checks, enclave=result.enclave, benchmark_owner_email=decision.owner.email,
+                        checks=checks, enclave=result.enclave, publication=result.publication,
+                        benchmark_owner_email=decision.owner.email,
                         benchmark_owner_display=decision.owner.display)
     return syft_receipt.to_index(statement, accepted)
 

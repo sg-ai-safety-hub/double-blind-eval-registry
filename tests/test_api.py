@@ -11,7 +11,7 @@ from registry import checks_tinfoil, spec
 from registry.app import create_app
 from registry.model import VerificationUnavailable
 
-BUNDLE_IGNORED = "bundle ignored: publication is not verified in this version"
+BUNDLE_IGNORED = "bundle ignored: check 7 looks the receipt up on Rekor"
 STRICT = [name for name, entry in EXPECTED.items() if "strict" in entry]
 
 
