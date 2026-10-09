@@ -9,7 +9,8 @@
       "hardware": "PASS",
       "measurement": "PASS",
       "digests": "PASS",
-      "consent": "PASS"
+      "consent": "PASS",
+      "publication": "PASS"
     },
     "dev": {
       "status": 201,
@@ -30,7 +31,8 @@
       "hardware": "PENDING",
       "measurement": "PENDING",
       "digests": "PASS",
-      "consent": "PASS"
+      "consent": "PASS",
+      "publication": "PENDING"
     },
     "dev": {
       "status": 201,
@@ -50,7 +52,8 @@
       "hardware": "PENDING",
       "measurement": "PENDING",
       "digests": "PASS",
-      "consent": "PASS"
+      "consent": "PASS",
+      "publication": "PENDING"
     },
     "dev": {
       "status": 422
@@ -66,7 +69,8 @@
       "hardware": "PENDING",
       "measurement": "PENDING",
       "digests": "PASS",
-      "consent": "PASS"
+      "consent": "PASS",
+      "publication": "PENDING"
     },
     "dev": {
       "status": 422
@@ -82,7 +86,8 @@
       "hardware": "PENDING",
       "measurement": "PENDING",
       "digests": "FAIL",
-      "consent": "PASS"
+      "consent": "PASS",
+      "publication": "PENDING"
     },
     "dev": {
       "status": 422
@@ -98,7 +103,8 @@
       "hardware": "PENDING",
       "measurement": "PENDING",
       "digests": "FAIL",
-      "consent": "PASS"
+      "consent": "PASS",
+      "publication": "PENDING"
     },
     "dev": {
       "status": 422
@@ -114,7 +120,8 @@
       "hardware": "PENDING",
       "measurement": "PENDING",
       "digests": "PASS",
-      "consent": "PASS"
+      "consent": "PASS",
+      "publication": "PENDING"
     },
     "dev": {
       "status": 422
@@ -130,7 +137,8 @@
       "hardware": "PENDING",
       "measurement": "PENDING",
       "digests": "PASS",
-      "consent": "FAIL"
+      "consent": "FAIL",
+      "publication": "PENDING"
     },
     "dev": {
       "status": 422
@@ -146,7 +154,8 @@
       "hardware": "PASS",
       "measurement": "PASS",
       "digests": "PASS",
-      "consent": "PASS"
+      "consent": "PASS",
+      "publication": "FAIL"
     },
     "dev": {
       "status": 422
@@ -166,7 +175,8 @@
       "hardware": "FAIL",
       "measurement": "FAIL",
       "digests": "PASS",
-      "consent": "PASS"
+      "consent": "PASS",
+      "publication": "FAIL"
     },
     "dev": {
       "status": 422
@@ -183,11 +193,13 @@
       "hardware": "FAIL",
       "measurement": "FAIL",
       "digests": "PASS",
-      "consent": "PASS"
+      "consent": "PASS",
+      "publication": "FAIL"
     },
     "dev": {
       "status": 422
-    }
+    },
+    "network": true
   },
   "C11_untrusted_repo": {
     "record": "fixtures/generated/C11_untrusted_repo.dsse.json",
@@ -199,7 +211,8 @@
       "hardware": "PASS",
       "measurement": "FAIL",
       "digests": "PASS",
-      "consent": "PASS"
+      "consent": "PASS",
+      "publication": "FAIL"
     },
     "dev": {
       "status": 422
@@ -216,7 +229,8 @@
       "hardware": "PASS",
       "measurement": "FAIL",
       "digests": "PASS",
-      "consent": "PASS"
+      "consent": "PASS",
+      "publication": "FAIL"
     },
     "dev": {
       "status": 422
@@ -233,7 +247,8 @@
       "hardware": "PASS",
       "measurement": "FAIL",
       "digests": "PASS",
-      "consent": "PASS"
+      "consent": "PASS",
+      "publication": "FAIL"
     },
     "dev": {
       "status": 422
@@ -340,7 +355,8 @@
       "hardware": "PENDING",
       "measurement": "PENDING",
       "digests": "PASS",
-      "consent": "PASS"
+      "consent": "PASS",
+      "publication": "PENDING"
     },
     "dev": {
       "status": 201,
@@ -357,7 +373,8 @@
       "hardware": "PENDING",
       "measurement": "PENDING",
       "digests": "PASS",
-      "consent": "PASS"
+      "consent": "PASS",
+      "publication": "PENDING"
     },
     "dev": {
       "status": 201,
@@ -374,7 +391,8 @@
       "hardware": "PENDING",
       "measurement": "PENDING",
       "digests": "PASS",
-      "consent": "PASS"
+      "consent": "PASS",
+      "publication": "PENDING"
     },
     "dev": {
       "status": 201,
@@ -391,7 +409,8 @@
       "hardware": "PENDING",
       "measurement": "PENDING",
       "digests": "PASS",
-      "consent": "PASS"
+      "consent": "PASS",
+      "publication": "PENDING"
     },
     "dev": {
       "status": 201,
@@ -408,7 +427,8 @@
       "hardware": "PENDING",
       "measurement": "PENDING",
       "digests": "PASS",
-      "consent": "PASS"
+      "consent": "PASS",
+      "publication": "PENDING"
     },
     "dev": {
       "status": 201,
@@ -425,7 +445,8 @@
       "hardware": "PENDING",
       "measurement": "PENDING",
       "digests": "PASS",
-      "consent": "PASS"
+      "consent": "PASS",
+      "publication": "PENDING"
     },
     "dev": {
       "status": 201,
@@ -442,7 +463,8 @@
       "hardware": "PENDING",
       "measurement": "PENDING",
       "digests": "PASS",
-      "consent": "PASS"
+      "consent": "PASS",
+      "publication": "PENDING"
     },
     "dev": {
       "status": 201,

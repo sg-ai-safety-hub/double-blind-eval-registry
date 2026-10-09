@@ -67,7 +67,7 @@ def check_attestation(attestation: Attestation, trusted_code: list[TrustedCode],
     try:
         verification = _verify_report(report)
     except Exception as e:
-        _raise_if_network(e, "check 3")
+        raise_if_network(e, "check 3")
         return _hardware_failed(f"the hardware report does not verify: {e}"), None
     hardware = Check("hardware", Status.PASS, "the report verifies against AMD's certificate chain and the SDK's TCB policy")
     measurement, enclave = _check_measurement(attestation.referenceValue, verification, trusted_code, refcache)
@@ -129,7 +129,7 @@ def _check_measurement(reference_value: ReferenceValue, verification: Verificati
     except (MeasurementMismatchError, FormatMismatchError):
         return Check("measurement", Status.FAIL, "the attested measurement is not the release's signed reference"), None
     except Exception as e:
-        _raise_if_network(e, "check 4")
+        raise_if_network(e, "check 4")
         return Check("measurement", Status.FAIL, f"the release's reference does not verify: {e}"), None
 
     refcache.put(repo, tag, reference)  # only after a PASS, so a bad fetch can't poison the cache
@@ -144,7 +144,7 @@ def _hardware_failed(detail: str) -> tuple[Check, Check, Check]:
             Check("measurement", Status.FAIL, NEEDS_CHECK_3))
 
 
-def _raise_if_network(error: Exception, where: str) -> None:
+def raise_if_network(error: Exception, where: str) -> None:
     """If a network or TUF error is anywhere in the error's cause or context chain,
     there is no verdict. The SDK wraps every error (verify_attestation in a ValueError)."""
     seen, pending = set(), [error]

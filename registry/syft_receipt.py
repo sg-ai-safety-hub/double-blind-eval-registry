@@ -277,6 +277,7 @@ def to_index(statement: Statement, accepted: Accepted) -> index.IndexedRecord:
         state=accepted.state,
         checks=accepted.checks,
         enclave=accepted.enclave,
+        publication=accepted.publication,
         benchmark_owner=index.Owner(email=accepted.benchmark_owner_email, display=accepted.benchmark_owner_display),
         predicate_type=statement.predicateType,
         adapter_version=ADAPTER_VERSION,

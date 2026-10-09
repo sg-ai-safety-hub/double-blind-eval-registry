@@ -12,8 +12,9 @@ ROOT = Path(__file__).resolve().parents[1]
 GUARDED = [
     spec.PREDICATE_TYPE, spec.PAYLOAD_TYPE, spec.KEY_BINDING_FORMAT, spec.REPORT_DATA_ALGORITHM,
     spec.CRYPTO_MATERIAL_FORMAT, spec.SEV_SNP_REPORT_FORMAT, spec.SPKI_KEY_FORMAT, spec.SIGNING_KEY_ID,
-    *spec.SENTINEL_PREFIXES,
+    *spec.SENTINEL_PREFIXES, spec.REKOR_URL, spec.REKOR_SEARCH_LINK,
 ]
+# REKOR_ENTRY_KIND ("dsse") and REKOR_ENTRY_API_VERSION ("0.0.1") aren't guarded either: "dsse" is in record.dsse.json.
 SOURCES = sorted(
     path for folder in ("registry", "scripts", "tests") for path in (ROOT / folder).rglob("*.py")
     if path != ROOT / "registry/spec.py"

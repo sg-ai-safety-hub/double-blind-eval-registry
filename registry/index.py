@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
 
 from registry import spec
-from registry.model import Check, Enclave
+from registry.model import Check, Enclave, Publication
 
 log = logging.getLogger(__name__)
 
@@ -43,6 +43,7 @@ CREATE TABLE records (
   benchmark_owner_email TEXT NOT NULL,
   benchmark_owner_display TEXT NOT NULL,
   enclave_json TEXT,
+  publication_json TEXT,
   reported_json TEXT NOT NULL,
   received_at TEXT NOT NULL,
   size INTEGER NOT NULL);
@@ -57,12 +58,12 @@ CREATE INDEX ix_comp_role ON components(role, digest);
 INSERT_RECORD = """
 INSERT INTO records (record_id, predicate_type, adapter_version, state, checks_json, subject_name, system_digest,
   eval_digest, eval_name, eval_public, eval_set_json, harness_json, harness_version, metrics_json, counts_json, scored,
-  parties_json, consent_json, benchmark_owner_email, benchmark_owner_display, enclave_json, reported_json,
-  received_at, size)
+  parties_json, consent_json, benchmark_owner_email, benchmark_owner_display, enclave_json, publication_json,
+  reported_json, received_at, size)
 VALUES (:record_id, :predicate_type, :adapter_version, :state, :checks_json, :subject_name, :system_digest,
   :eval_digest, :eval_name, :eval_public, :eval_set_json, :harness_json, :harness_version, :metrics_json, :counts_json,
-  :scored, :parties_json, :consent_json, :benchmark_owner_email, :benchmark_owner_display, :enclave_json, :reported_json,
-  :received_at, :size)
+  :scored, :parties_json, :consent_json, :benchmark_owner_email, :benchmark_owner_display, :enclave_json,
+  :publication_json, :reported_json, :received_at, :size)
 ON CONFLICT (record_id) DO NOTHING
 """
 INSERT_COMPONENT = "INSERT INTO components (record_id, role, scheme, digest, name, aka_json) VALUES (?, ?, ?, ?, ?, ?)"
@@ -171,6 +172,7 @@ class IndexedRecord(Shape):
     state: Literal["verified", "incomplete"]
     checks: tuple[Check, ...]
     enclave: Enclave | None  # verified facts only: None unless checks 3 and 4 PASSed
+    publication: Publication | None  # where Rekor logs it: None unless check 7 PASSed
     benchmark_owner: Owner
     # What the receipt says, mapped by its format's adapter.
     predicate_type: str
@@ -330,7 +332,8 @@ def _record_row(record: IndexedRecord) -> dict:
         "parties_json": _dumps(data["parties"]), "consent_json": _dumps(data["consent"]),
         "benchmark_owner_email": record.benchmark_owner.email,
         "benchmark_owner_display": record.benchmark_owner.display,
-        "enclave_json": _dumps(data["enclave"]), "reported_json": _dumps(data["reported"]),
+        "enclave_json": _dumps(data["enclave"]), "publication_json": _dumps(data["publication"]),
+        "reported_json": _dumps(data["reported"]),
         "received_at": record.received_at, "size": record.size,
     }
 
@@ -345,6 +348,7 @@ def _record(row: sqlite3.Row, components: list[sqlite3.Row]) -> IndexedRecord:
     return IndexedRecord.model_validate({
         "recordId": row["record_id"], "size": row["size"], "receivedAt": row["received_at"], "state": row["state"],
         "checks": _loads(row["checks_json"]), "enclave": _loads(row["enclave_json"]),
+        "publication": _loads(row["publication_json"]),
         "benchmarkOwner": {"email": row["benchmark_owner_email"], "display": row["benchmark_owner_display"]},
         "predicateType": row["predicate_type"], "adapterVersion": row["adapter_version"],
         "subjectName": row["subject_name"], "systemDigest": row["system_digest"],

@@ -1,5 +1,5 @@
 """OpenMined's receipt and the live captures, through the real SDK with nothing replaced. Needs the network:
-AMD's VCEK via Tinfoil's proxy, Sigstore's TUF root and GitHub. The fixture-driven tests in test_ingest.py
+AMD's VCEK via Tinfoil's proxy, Sigstore's TUF root, GitHub and Rekor. The fixture-driven tests in test_ingest.py
 and test_api.py cover every live fixture's verdict; these cover the refcache and the enclave facts."""
 
 import base64
@@ -15,7 +15,8 @@ from registry import refcache as refcache_module
 from registry.config import BenchmarkOwner, Policy, TrustedCode
 from registry.envelope import parse_receipt
 from registry.ingest import verify
-from registry.model import CHECK_IDS, Status
+from registry import spec
+from registry.model import CHECK_IDS, Publication, Status
 from registry.refcache import RefCache
 from registry.syft_receipt import parse_statement
 
@@ -50,6 +51,18 @@ def test_openmined_s_receipt_passes_every_check_and_yields_the_verified_enclave_
     report = Report(base64.b64decode(key_binding["cpu_evidence"]["report_base64"]))
     assert (enclave.type, enclave.repo, enclave.release_tag) == ("AMD SEV-SNP", RELEASE["repo"], RELEASE["tag"])
     assert enclave.measurement == report.measurement.hex()
+
+
+def test_openmined_s_receipt_is_found_on_the_real_rekor(refcache):
+    # As captured in fixtures/rekor: Rekor's log is append-only, so the entry stays where it is.
+    assert run("om_receipt", refcache).publication == Publication(
+        uuid="108e9186e8c5677a90985c71d8a25a4de23d6f7e17e8d0cb40089161de9a6ed3cc14072c0d1a5a6f",
+        log_index=3129204433, integrated_time=1791368875, url=spec.REKOR_SEARCH_LINK.format(3129204433))
+
+
+def test_a_receipt_with_a_real_report_that_nobody_logged_fails_check_7(refcache):
+    result = run("stapled_B", refcache)
+    assert (statuses(result)["publication"], result.publication) == (Status.FAIL, None)
 
 
 def test_stapled_b_passes_checks_3_and_4_but_not_2(refcache):

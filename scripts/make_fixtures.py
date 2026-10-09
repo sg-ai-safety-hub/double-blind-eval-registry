@@ -46,7 +46,7 @@ SIMULATED = spec.SIMULATED_PREFIX + "not-from-a-real-enclave"  # the sentinel a 
 FOREIGN_PREDICATE_TYPE = "https://slsa.dev/provenance/v1"
 UNLISTED = "unlisted@example.org"  # C6's approver: must never be listed in registry-policy.dev.example.yaml
 P256_ORDER = 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551  # n of SECP256R1
-# A check vector such as "PFPPPP" has one letter per check, 1-6 in order.
+# A check vector such as "PFPPPPF" has one letter per check, 1-7 in order.
 VECTOR = {"P": Status.PASS, "F": Status.FAIL, "-": Status.PENDING}
 DELETE = object()
 
@@ -216,13 +216,13 @@ def build() -> tuple[dict[str, bytes], dict]:
         entry = {"record": path, "recordId": hashlib.sha256(data).hexdigest(), "description": description,
                  "checks": None if vector is None else dict(zip(CHECK_IDS, (VECTOR[c] for c in vector), strict=True))}
         entry["dev"] = {"status": dev, "state": state} if dev == 201 else {"status": dev}
-        if network:  # checks 3 and 4 fetch AMD's VCEK and Sigstore's trust root, so its tests need the network
+        if network:  # a real or random report: checks 3-4 fetch AMD's VCEK and Sigstore's root, check 7 asks Rekor
             entry["network"] = True
         if strict is not None:
             entry["strict"] = {"status": strict}
         expected[name] = entry
 
-    add("om_receipt", OPENMINED.read_bytes(), "OpenMined's receipt, as their enclave signed it", "PPPPPP",
+    add("om_receipt", OPENMINED.read_bytes(), "OpenMined's receipt, as their enclave signed it", "PPPPPPP",
         state="verified", strict=422, path=str(OPENMINED.relative_to(ROOT)), network=True)
 
     key_a = ed25519("A")
@@ -236,28 +236,29 @@ def build() -> tuple[dict[str, bytes], dict]:
     sim_a = signed_by(base, key_a)
     sim_a_bytes = envelope(rfc8785.dumps(sim_a), key_a)
     add("sim_A", sim_a_bytes, "OpenMined's statement, simulated: fixture key A signs, and no hardware report",
-        "P---PP", strict=422)
+        "P---PP-", strict=422)
 
     edited_after_signing = json.loads(sim_a_bytes)
     edited_after_signing["payload"] = b64(rfc8785.dumps(changed(sim_a, {"subject.0.name": "renamed after signing"})))
     add("C1_edit_after_sign", rfc8785.dumps(edited_after_signing),
-        "sim_A with subject[0].name changed after signing", "F---PP", dev=422)
+        "sim_A with subject[0].name changed after signing", "F---PP-", dev=422)
     add("C2_other_signer", sealed(base, key_a, signer=ed25519("X")),
-        "crypto_material names key A, but key X signed", "F---PP", dev=422)
+        "crypto_material names key A, but key X signed", "F---PP-", dev=422)
     add("C3_pipeline", re_signed({"predicate.evalPipeline.models.1.digest":
                                   flipped(base["predicate"]["evalPipeline"]["models"][1]["digest"])}),
-        "An evalPipeline model digest altered, the subject not, re-signed", "P---FP", dev=422)
+        "An evalPipeline model digest altered, the subject not, re-signed", "P---FP-", dev=422)
     add("C4_subject", re_signed({"subject.0.digest.sha256": flipped(base["subject"][0]["digest"]["sha256"])}),
-        "Subject digest altered, re-signed", "P---FP", dev=422)
+        "Subject digest altered, re-signed", "P---FP-", dev=422)
     add("C5_p256_key", sealed(base, p256("A-p256")),
-        "The enclave signing key is EC P-256, not Ed25519, and signs", "F---PP", dev=422)
+        "The enclave signing key is EC P-256, not Ed25519, and signs", "F---PP-", dev=422)
     approvals = base["predicate"]["consent"]["approvals"]
     add("C6_unlisted_approver", re_signed({"predicate.consent.approvals": [{**approvals[0], "party": UNLISTED},
                                                                            *approvals[1:]]}),
-        "Like sim_A, but no approval comes from an email on the dev list", "P---PF", dev=422)
+        "Like sim_A, but no approval comes from an email on the dev list", "P---PF-", dev=422)
 
     # OpenMined's real hardware report, stapled onto receipts signed with fixture key B: checks 3 and 4
-    # can PASS, but the report commits to OpenMined's crypto_material, not B's, so check 2 FAILs.
+    # can PASS, but the report commits to OpenMined's crypto_material, not B's, so check 2 FAILs. Nobody logged
+    # these receipts on Rekor, so check 7 FAILs them all.
     report = key_binding(base)["cpu_evidence"]["report_base64"]
     raw_report = base64.b64decode(report, validate=True)
 
@@ -268,14 +269,14 @@ def build() -> tuple[dict[str, bytes], dict]:
 
     add("stapled_B", stapled(report, **release),
         "OpenMined's statement with its real report, but crypto_material names fixture key B, which signs",
-        "PFPPPP", dev=422, strict=422, network=True)
+        "PFPPPPF", dev=422, strict=422, network=True)
     flipped_report = bytearray(raw_report)
     flipped_report[raw_report.index(Report(raw_report).measurement)] ^= 1
     add("C8_report_flip", stapled(b64(bytes(flipped_report)), **release),
-        "stapled_B with one measurement byte flipped in the report", "PFFFPP", dev=422, network=True)
+        "stapled_B with one measurement byte flipped in the report", "PFFFPPF", dev=422, network=True)
     garbage = hashlib.shake_256(b"fpr-fixture:garbage-report").digest(len(raw_report))
-    add("C9_garbage_report", stapled(b64(garbage), **release),  # rejected while parsing, before any fetch
-        "stapled_B with report_base64 = base64 of random bytes (not a sentinel)", "PFFFPP", dev=422)
+    add("C9_garbage_report", stapled(b64(garbage), **release),  # check 3 rejects it before any fetch; check 7 asks Rekor
+        "stapled_B with report_base64 = base64 of random bytes (not a sentinel)", "PFFFPPF", dev=422, network=True)
     router = live_capture("router")
     if router is None:
         print(f"skipped C11, C12: {TINFOIL.relative_to(ROOT)}/router.* is missing; "
@@ -284,12 +285,12 @@ def build() -> tuple[dict[str, bytes], dict]:
         router_report, router_release = router
         add("C11_untrusted_repo", stapled(b64(router_report), router_release["repo"], router_release["tag"]),
             "Tinfoil's live router report, with referenceValue naming the router repo (not in trusted_code)",
-            "PFPFPP", dev=422, network=True)
+            "PFPFPPF", dev=422, network=True)
         add("C12_repo_mismatch", stapled(b64(router_report), **release),
-            "Tinfoil's live router report, with referenceValue naming OpenMined's repo and tag", "PFPFPP", dev=422,
+            "Tinfoil's live router report, with referenceValue naming OpenMined's repo and tag", "PFPFPPF", dev=422,
             network=True)
     add("C13_tag_missing", stapled(report, release["repo"], MISSING_TAG),
-        f"stapled_B with referenceValue.tag {MISSING_TAG}: no release asset", "PFPFPP", dev=422, network=True)
+        f"stapled_B with referenceValue.tag {MISSING_TAG}: no release asset", "PFPFPPF", dev=422, network=True)
 
     add("U1_predicate_type", re_signed({"predicateType": FOREIGN_PREDICATE_TYPE}),
         "predicateType changed, re-signed", dev=400)
@@ -377,7 +378,7 @@ def build() -> tuple[dict[str, bytes], dict]:
         7: "Synthetic; a component named <script>alert(1)</script>",
     }
     for n, statement in enumerate(records, start=1):
-        add(f"D{n}", sealed(statement, ed25519(f"run:D{n}")), descriptions[n], "P---PP")
+        add(f"D{n}", sealed(statement, ed25519(f"run:D{n}")), descriptions[n], "P---PP-")
 
     return files, expected
 

@@ -2,7 +2,7 @@
 
 A local web app that verifies and indexes AI-evaluation receipts for SASH's Four Pillars project.
 
-The registry runs six checks on each submitted receipt, stores the exact bytes it received for each
+The registry runs seven checks on each submitted receipt, stores the exact bytes it received for each
 accepted receipt, and lists what it accepted. Work in progress: receipt ingestion, the index and the
 read API work; the UI is still being built.
 
@@ -37,10 +37,15 @@ real receipt from OpenMined's enclave, and most test fixtures are built from its
 | 4 | measurement | the attested measurement is the Sigstore-signed release of a trusted repo |
 | 5 | digests | the subject digest is sha256 of `evalPipeline`'s JCS |
 | 6 | consent | an approval comes from an email on the registry's policy list |
+| 7 | publication | the receipt is logged on [Rekor](https://docs.sigstore.dev/logging/overview/), Sigstore's public transparency log: an entry found by the payload's hash holds the receipt's signature and signing key |
 
 A receipt is listed as **verified** when every check passes. A receipt with no hardware report
-(checks 2–4 pending) is accepted as **incomplete**, in dev mode only. Anything else is refused.
+(checks 2–4 and 7 pending) is accepted as **incomplete**, in dev mode only. Anything else is refused.
 OpenMined checks who owns each approver email; the registry only matches emails against its list.
+
+Check 7 looks the receipt up on Rekor v1, where OpenMined's benchmark owner logs it right after the run. It
+trusts Rekor's answer: it doesn't verify the entry's signed timestamp or inclusion proof, and it doesn't say
+who logged the receipt.
 
 
 ## Run it
@@ -50,7 +55,7 @@ Needs Python 3.12 with [uv](https://docs.astral.sh/uv/), and Node with pnpm 11 (
 ```bash
 uv sync
 uv run pytest -m "not network"      # offline tests
-uv run pytest                       # also the network tests (AMD via Tinfoil, Sigstore, GitHub)
+uv run pytest                       # also the network tests (AMD via Tinfoil, Sigstore, GitHub, Rekor)
 
 REGISTRY_MODE=dev uv run flask --app registry.app run --port 5050 --reload
 curl -X POST http://127.0.0.1:5050/api/records -F 'record=@fixtures/generated/sim_A.dsse.json'
@@ -66,7 +71,7 @@ cd web && pnpm install && pnpm dev  # UI at http://localhost:5173
 - **Trust.** Trust comes only from the policy file (`registry-policy.yaml`, or `registry-policy.dev.yaml`
   in dev mode, copied from the example on first run). `trusted_code` lists the repos check 4 trusts, and
   `benchmark_owners` lists the approver emails check 6 accepts.
-- **Network.** Checks 3 and 4 need the network. If it can't be reached, the POST returns 503 and
+- **Network.** Checks 3, 4 and 7 need the network. If it can't be reached, the POST returns 503 and
   nothing is stored.
 - **Index.** The store (`data/<mode>/store`) holds the exact bytes of each accepted receipt; the index
   (`data/<mode>/index.sqlite3`) is derived from it. The server refuses to start on an index built under

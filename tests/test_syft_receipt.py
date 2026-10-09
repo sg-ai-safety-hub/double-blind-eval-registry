@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from registry import spec
-from registry.model import CHECK_IDS, Accepted, Check, Enclave, Status
+from registry.model import CHECK_IDS, Accepted, Check, Enclave, Publication, Status
 from registry.syft_receipt import ADAPTER_VERSION, SchemaError, parse_statement, to_index
 
 OPENMINED = Path(__file__).resolve().parents[1] / "fixtures/openmined/receipt.dsse.json"
@@ -258,7 +258,7 @@ def test_the_signing_key_id_comes_from_spec(monkeypatch):
 
 ACCEPTED = Accepted(record_id="ab" * 32, size=2048, received_at="2026-10-08T01:02:03Z", state="incomplete",
                     checks=tuple(Check(check_id, Status.PASS, "stand-in") for check_id in CHECK_IDS),
-                    enclave=None, benchmark_owner_email="benchmark_owner@openmined.org",
+                    enclave=None, publication=None, benchmark_owner_email="benchmark_owner@openmined.org",
                     benchmark_owner_display="OpenMined sample benchmark owner")
 
 
@@ -284,6 +284,15 @@ def test_the_adapter_carries_the_verified_enclave_facts():
     assert record["enclave"] == {"type": "AMD SEV-SNP", "measurement": "33" * 48,
                                  "repo": "OpenMined/syft-enclave-tinfoil", "releaseTag": "v0.1.28",
                                  "releaseDigest": "74" * 32}
+
+
+def test_the_adapter_carries_where_rekor_logs_the_receipt():
+    publication = Publication(uuid="10" * 40, log_index=3129204433, integrated_time=1791368875,
+                              url=spec.REKOR_SEARCH_LINK.format(3129204433))
+    record = indexed(accepted=dataclasses.replace(ACCEPTED, publication=publication))
+    assert record["publication"] == {"uuid": "10" * 40, "logIndex": 3129204433, "integratedTime": 1791368875,
+                                     "url": spec.REKOR_SEARCH_LINK.format(3129204433)}
+    assert indexed()["publication"] is None
 
 
 def test_the_adapter_pairs_the_listed_approver_with_the_registry_s_display_name():

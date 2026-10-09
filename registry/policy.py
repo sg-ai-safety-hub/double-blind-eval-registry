@@ -13,7 +13,8 @@ log = logging.getLogger(__name__)
 
 # The two acceptable results, check by check. Anything else is refused.
 VERIFIED = {check_id: Status.PASS for check_id in CHECK_IDS}
-INCOMPLETE = {**VERIFIED, "key_binding": Status.PENDING, "hardware": Status.PENDING, "measurement": Status.PENDING}
+INCOMPLETE = {**VERIFIED, "key_binding": Status.PENDING, "hardware": Status.PENDING, "measurement": Status.PENDING,
+              "publication": Status.PENDING}  # no hardware report: test data, so not on Rekor either
 STATES = {"verified": VERIFIED, "incomplete": INCOMPLETE}
 
 
