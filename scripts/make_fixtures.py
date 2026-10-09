@@ -7,10 +7,12 @@ Deterministic, so running it again rewrites identical bytes: every key is derive
 sha256(b"fpr-fixture:" + name), Ed25519 and ECDSA (RFC 6979) signatures are deterministic, and
 statements and envelopes are serialised with JCS.
 
-It prints the benchmark owners' keys the fixtures use, for registry-policy.dev.example.yaml.
+Every generated receipt starts from the statement OpenMined's enclave signed
+(fixtures/openmined/receipt.dsse.json), which is itself fixture om_receipt. It prints the approver
+emails the fixtures use, for registry-policy.dev.example.yaml.
 
-THESE ARE NOT TRUSTWORTHY RECORDS: every key comes from a public name, and every quote is a SIMULATED
-sentinel, a live Tinfoil report stapled onto a receipt it doesn't belong to, or random bytes.
+THESE ARE NOT TRUSTWORTHY RECORDS: every key comes from a public name, and every hardware report is a
+SIMULATED sentinel, a real report stapled onto a receipt it doesn't belong to, or random bytes.
 """
 
 import base64
@@ -29,24 +31,23 @@ from securesystemslib.signer import Signature
 from tinfoil.attestation.abi_sev import Report
 
 from registry import spec
-from registry.checks_software import eval_digest, pipeline_digest
 from registry.model import CHECK_IDS, Status
 
 ROOT = Path(__file__).resolve().parents[1]
 GENERATED = ROOT / "fixtures/generated"
 EXPECTED = ROOT / "fixtures/expected.json"
-WORKED_EXAMPLE = ROOT / "fixtures/evalresult/worked_example.statement.json"
+OPENMINED = ROOT / "fixtures/openmined/receipt.dsse.json"  # signed by OpenMined's enclave, as received
+UNSIGNED = ROOT / "fixtures/openmined/sample-receipt.json"  # the same statement, without its envelope
 DBE_SAMPLE = ROOT / "fixtures/dbe/sample-receipt.json"
 TINFOIL = ROOT / "fixtures/tinfoil"  # live captures from scripts/capture_tinfoil_reports.py
 MISSING_TAG = "v0.0.0-does-not-exist"
 
 SIMULATED = spec.SIMULATED_PREFIX + "not-from-a-real-enclave"  # the sentinel a simulated enclave writes
-WORKED_EXAMPLE_ROLES = {"model_provider": spec.MODEL_OWNER, "evaluator": spec.BENCHMARK_OWNER}  # to DBE's names
 FOREIGN_PREDICATE_TYPE = "https://slsa.dev/provenance/v1"
-TRUSTED_REPO = spec.REFERENCE_REPO_PREFIX + "tinfoilsh/double-blind-eval"  # as in the worked example
+UNLISTED = "unlisted@example.org"  # C6's approver: must never be listed in registry-policy.dev.example.yaml
 P256_ORDER = 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551  # n of SECP256R1
-# A check vector such as "PFPPPnP" has one letter per check, 1-7 in order.
-VECTOR = {"P": Status.PASS, "F": Status.FAIL, "-": Status.PENDING, "n": Status.NA}
+# A check vector such as "PFPPPP" has one letter per check, 1-6 in order.
+VECTOR = {"P": Status.PASS, "F": Status.FAIL, "-": Status.PENDING}
 DELETE = object()
 
 
@@ -64,10 +65,7 @@ def p256(name: str) -> ec.EllipticCurvePrivateKey:
     return ec.derive_private_key(int.from_bytes(seed(name), "big") % P256_ORDER, ec.SECP256R1())
 
 
-def public_bytes(key) -> bytes:
-    """runPublicKey's bytes: the raw key for Ed25519, SPKI DER for EC."""
-    if isinstance(key, Ed25519PrivateKey):
-        return key.public_key().public_bytes_raw()
+def spki(key) -> bytes:
     return key.public_key().public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
 
 
@@ -85,38 +83,44 @@ def synthetic_digest(label: str) -> str:
     return hashlib.sha256(b"fpr-fixture-digest:" + label.encode()).hexdigest()
 
 
+def jcs_digest(obj) -> str:
+    return hashlib.sha256(rfc8785.dumps(obj)).hexdigest()
+
+
 # --- envelopes ---------------------------------------------------------------
 
 def envelope(payload: bytes, *signers, payload_type: str = spec.PAYLOAD_TYPE) -> bytes:
     """A JCS-serialised DSSE envelope with one signature per signer over PAE(payload_type, payload)."""
     env = Envelope(payload=payload, payload_type=payload_type, signatures={})
     for key in signers:
-        keyid = hashlib.sha256(public_bytes(key)).hexdigest()
+        keyid = hashlib.sha256(spki(key)).hexdigest()
         env.signatures[keyid] = Signature(keyid, sign(key, env.pae()).hex())
     return rfc8785.dumps(env.to_dict())
 
 
-def in_simulated_enclave(statement: dict, run_key) -> dict:
-    """A run in a simulated enclave: bind the run key for real, leave quote and measurement SIMULATED."""
+def key_binding(statement: dict) -> dict:
+    return statement["predicate"]["execution"]["attestation"]["keyBinding"]
+
+
+def signed_by(statement: dict, key, report: str = SIMULATED) -> dict:
+    """The statement with `key` as crypto_material's enclave signing key and `report` as its hardware report.
+
+    The other crypto_material items stay. With a SIMULATED report nothing binds the key, so checks 2-4
+    are PENDING; with a real one, the report commits to another crypto_material, so check 2 FAILs.
+    """
     statement = copy.deepcopy(statement)
-    execution = statement["predicate"]["execution"]
-    pub = public_bytes(run_key)
-    execution["runPublicKey"] = pub.hex()
-    execution["attestation"]["reportData"] = hashlib.sha256(pub).hexdigest()
-    execution["attestation"]["quote"] = SIMULATED
-    execution["attestation"]["measurement"] = SIMULATED
+    binding = key_binding(statement)
+    material = json.loads(base64.b64decode(binding["crypto_material"]))
+    material["items"] = [item for item in material["items"] if item["id"] != spec.SIGNING_KEY_ID] + [
+        {"id": spec.SIGNING_KEY_ID, "format": spec.SPKI_KEY_FORMAT, "data": spki(key).hex()}]
+    binding["crypto_material"] = b64(rfc8785.dumps(material))
+    binding["cpu_evidence"]["report_base64"] = report
     return statement
 
 
-def sealed(statement: dict, run_key, signer=None) -> bytes:
-    """The statement run in the simulated enclave under `run_key`, signed by `signer` (default: the run key)."""
-    return envelope(rfc8785.dumps(in_simulated_enclave(statement, run_key)), signer or run_key)
-
-
-def approval(party: str, key: Ed25519PrivateKey, manifest_digest: str) -> dict:
-    """A consent approval as DBE signs it."""
-    message = spec.CONSENT_PREFIX + manifest_digest.encode("ascii")
-    return {"party": party, "publicKey": public_bytes(key).hex(), "signature": b64(key.sign(message))}
+def sealed(statement: dict, key, signer=None, report: str = SIMULATED) -> bytes:
+    """The statement signed_by `key`, in an envelope signed by `signer` (default: the same key)."""
+    return envelope(rfc8785.dumps(signed_by(statement, key, report)), signer or key)
 
 
 def live_capture(name: str) -> tuple[bytes, dict] | None:
@@ -129,11 +133,14 @@ def live_capture(name: str) -> tuple[bytes, dict] | None:
 
 # --- statements --------------------------------------------------------------
 
-def worked_example() -> dict:
-    """The worked example with DBE's party names. The file itself is never changed."""
-    statement = json.loads(WORKED_EXAMPLE.read_text())
-    for party in statement["predicate"]["parties"]:
-        party["role"] = WORKED_EXAMPLE_ROLES.get(party["role"], party["role"])
+def openmined() -> dict:
+    """The statement OpenMined's enclave signed, without the bulky parts the registry never reads:
+    file contents and the attestation's collateral. The file itself is never changed."""
+    statement = json.loads(base64.b64decode(json.loads(OPENMINED.read_bytes())["payload"], validate=True))
+    predicate = statement["predicate"]
+    for part in (*predicate["job"]["code"], *predicate["outputs"]):
+        del part["content"]
+    del key_binding(statement)["collateral"]
     return statement
 
 
@@ -158,55 +165,40 @@ def flipped(hex_digest: str) -> str:
     return hex_digest[:-1] + ("0" if hex_digest[-1] != "0" else "1")
 
 
-def component(role: str, scheme: str, label: str, name: str, **extra) -> dict:
-    digest = synthetic_digest(f"{role}:{label}")
-    if scheme == spec.OCI_SCHEME:
-        digest = "sha256:" + digest
-    return {"role": role, "scheme": scheme, "digest": digest, "name": name, **extra}
+def model(role: str, label: str, name: str, **extra) -> dict:
+    return {"id": label, "role": role, "scheme": "dirhash-sha256/1", "digest": synthetic_digest(f"{role}:{label}"),
+            "name": name, **extra}
 
 
-def evaluation(label: str, name: str, public: bool, harness_version: str) -> dict:
-    eval_set = {"scheme": "file-sha256/1", "digest": synthetic_digest(f"eval-set:{label}")}
-    harness = {"scheme": spec.OCI_SCHEME, "digest": "sha256:" + synthetic_digest(f"harness:{label}")}
-    return {"evalDigest": eval_digest(eval_set, harness), "evalSet": eval_set, "harness": harness,
-            "name": name, "harnessVersion": harness_version, "public": public}
+def sampling(label: str, **params) -> dict:
+    return {"id": f"sampling-{label}", "kind": "sampling", "scheme": "jcs-sha256/1", "digest": jcs_digest(params),
+            "params": params, "appliesTo": [spec.BASE_MODEL_ROLE]}
 
 
-def synthetic(n: int, subject: str, components: list, eval_: dict, owners: tuple, results: dict) -> dict:
-    """Record Dn: made-up components, eval and parties with valid consent; the enclave sim fills in the quote."""
-    model_owner, benchmark_owner = owners
-    pipeline = pipeline_digest(components)
-    manifest = synthetic_digest(f"manifest:D{n}")
+def dataset(label: str, name: str) -> dict:
+    return {"scheme": "file-sha256/1", "digest": synthetic_digest(f"dataset:{label}"), "name": name}
+
+
+def synthetic(n: int, subject: str, models: list, config: list, eval_dataset: dict, approvers: tuple,
+              results: dict, base: dict) -> dict:
+    """Record Dn: a made-up pipeline, dataset, parties and consent, run in base's (simulated) enclave."""
+    pipeline = {"config": config, "models": models}
+    judge, weights_owner = approvers
+    execution = {**base["predicate"]["execution"], "platform": "synthetic", "cvmVersion": "0.0.0-synthetic",
+                 "runId": synthetic_digest(f"run:D{n}")[:32], "configDigest": synthetic_digest(f"config:D{n}"),
+                 "startedAt": f"2026-10-0{n}T10:00:00Z", "finishedAt": f"2026-10-0{n}T10:05:00Z"}
     predicate = {
-        "version": spec.PREDICATE_VERSION,
-        "system": {"pipelineDigest": pipeline, "components": components},
-        "eval": eval_,
+        "evalPipeline": pipeline,
+        "evalDataset": eval_dataset,
         "results": results,
-        "execution": {
-            "platform": "synthetic",
-            "cvmVersion": "0.0.0-synthetic",
-            "runId": synthetic_digest(f"run:D{n}")[:32],
-            "configDigest": synthetic_digest(f"config:D{n}"),
-            "attestation": {
-                "type": "sev-snp",
-                "referenceValue": {"source": spec.REFERENCE_SOURCE, "repo": TRUSTED_REPO, "tag": "v0.1.0"},
-            },
-            "startedAt": f"2026-09-0{n}T10:00:00Z",
-            "finishedAt": f"2026-09-0{n}T10:05:00Z",
-        },
-        "parties": [
-            {"role": spec.MODEL_OWNER,
-             "identity": {"scheme": spec.ED25519_KEY_SCHEME, "publicKey": public_bytes(model_owner).hex()}},
-            {"role": spec.BENCHMARK_OWNER,
-             "identity": {"scheme": spec.ED25519_KEY_SCHEME, "publicKey": public_bytes(benchmark_owner).hex()}},
-            {"role": "compute", "identity": {"scheme": "named/1", "name": "Synthetic Compute"}},
-        ],
-        "consent": {"manifestDigest": manifest, "approvals": [
-            approval(spec.MODEL_OWNER, model_owner, manifest),
-            approval(spec.BENCHMARK_OWNER, benchmark_owner, manifest),
-        ]},
+        "execution": execution,
+        "parties": [{"role": "submitter", "email": judge}, {"role": "data_owner", "email": judge},
+                    {"role": "data_owner", "email": weights_owner}],
+        "consent": {"manifestDigest": synthetic_digest(f"manifest:D{n}"), "approvals": [
+            {"approvedAt": f"2026-10-0{n}T09:00:00Z", "party": judge},
+            {"approvedAt": f"2026-10-0{n}T09:30:00Z", "party": weights_owner}]},
     }
-    return {"_type": spec.STATEMENT_TYPE, "subject": [{"name": subject, "digest": {"sha256": pipeline}}],
+    return {"_type": spec.STATEMENT_TYPE, "subject": [{"name": subject, "digest": {"sha256": jcs_digest(pipeline)}}],
             "predicateType": spec.PREDICATE_TYPE, "predicate": predicate}
 
 
@@ -216,114 +208,88 @@ def build() -> tuple[dict[str, bytes], dict]:
     """Return ({file name: bytes}, expected.json) without writing anything."""
     files, expected = {}, {}
 
-    def add(name, data, description, vector=None, dev=201, strict=None, path=None, network=False):
+    def add(name, data, description, vector=None, dev=201, state="incomplete", strict=None, path=None,
+            network=False):
         if path is None:
             path = f"fixtures/generated/{name}.dsse.json"
             files[f"{name}.dsse.json"] = data
         entry = {"record": path, "recordId": hashlib.sha256(data).hexdigest(), "description": description,
-                 "checks": None if vector is None else dict(zip(CHECK_IDS, (VECTOR[c] for c in vector)))}
-        entry["dev"] = {"status": dev, "state": "incomplete"} if dev == 201 else {"status": dev}
+                 "checks": None if vector is None else dict(zip(CHECK_IDS, (VECTOR[c] for c in vector), strict=True))}
+        entry["dev"] = {"status": dev, "state": state} if dev == 201 else {"status": dev}
         if network:  # checks 3 and 4 fetch AMD's VCEK and Sigstore's trust root, so its tests need the network
             entry["network"] = True
         if strict is not None:
             entry["strict"] = {"status": strict}
         expected[name] = entry
 
+    add("om_receipt", OPENMINED.read_bytes(), "OpenMined's receipt, as their enclave signed it", "PPPPPP",
+        state="verified", strict=422, path=str(OPENMINED.relative_to(ROOT)), network=True)
+
     key_a = ed25519("A")
-    base = worked_example()
-    approvals = {a["party"]: a for a in base["predicate"]["consent"]["approvals"]}
-    model_owner_approval, benchmark_owner_approval = approvals[spec.MODEL_OWNER], approvals[spec.BENCHMARK_OWNER]
-    manifest = base["predicate"]["consent"]["manifestDigest"]
-    owner_index = [p["role"] for p in base["predicate"]["parties"]].index(spec.BENCHMARK_OWNER)
+    base = openmined()
+    reference = base["predicate"]["execution"]["attestation"]["referenceValue"]
+    release = {"repo": reference["repo"].removeprefix(spec.REFERENCE_REPO_PREFIX), "tag": reference["tag"]}
 
     def re_signed(changes: dict) -> bytes:
         return sealed(changed(base, changes), key_a)
 
-    sim_a = in_simulated_enclave(base, key_a)
+    sim_a = signed_by(base, key_a)
     sim_a_bytes = envelope(rfc8785.dumps(sim_a), key_a)
-    add("sim_A", sim_a_bytes, "Worked example, re-signed with fixture key A", "P---PnP", strict=422)
-    key_a_ec = p256("A-p256")
-    add("sim_A_ec", sealed(base, key_a_ec), "Same statement; EC P-256 key; runPublicKey is SPKI DER hex", "P---PnP")
-    add("sim_A_noconsent", re_signed({"predicate.consent": DELETE}),
-        f"sim_A without consent, re-signed: no {spec.BENCHMARK_OWNER} approval for the gate", "P---Pnn", dev=403)
+    add("sim_A", sim_a_bytes, "OpenMined's statement, simulated: fixture key A signs, and no hardware report",
+        "P---PP", strict=422)
 
     edited_after_signing = json.loads(sim_a_bytes)
     edited_after_signing["payload"] = b64(rfc8785.dumps(changed(sim_a, {"subject.0.name": "renamed after signing"})))
     add("C1_edit_after_sign", rfc8785.dumps(edited_after_signing),
-        "sim_A with subject[0].name changed after signing", "F---PnP", dev=422)
-    add("C2_other_signer", sealed(base, ed25519("Y"), signer=ed25519("X")),
-        "Signed with key X, while runPublicKey names key Y", "F---PnP", dev=422)
-    add("C3_pipeline", re_signed({"predicate.system.pipelineDigest": flipped(base["predicate"]["system"]["pipelineDigest"])}),
-        "pipelineDigest altered, re-signed", "P---FnP", dev=422)
+        "sim_A with subject[0].name changed after signing", "F---PP", dev=422)
+    add("C2_other_signer", sealed(base, key_a, signer=ed25519("X")),
+        "crypto_material names key A, but key X signed", "F---PP", dev=422)
+    add("C3_pipeline", re_signed({"predicate.evalPipeline.models.1.digest":
+                                  flipped(base["predicate"]["evalPipeline"]["models"][1]["digest"])}),
+        "An evalPipeline model digest altered, the subject not, re-signed", "P---FP", dev=422)
     add("C4_subject", re_signed({"subject.0.digest.sha256": flipped(base["subject"][0]["digest"]["sha256"])}),
-        "Subject digest differs from pipelineDigest, re-signed", "P---FnP", dev=422)
-    add("C5_eval", re_signed({"predicate.eval.evalDigest": flipped(base["predicate"]["eval"]["evalDigest"])}),
-        "evalDigest altered, re-signed", "P---FnP", dev=422)
+        "Subject digest altered, re-signed", "P---FP", dev=422)
+    add("C5_p256_key", sealed(base, p256("A-p256")),
+        "The enclave signing key is EC P-256, not Ed25519, and signs", "F---PP", dev=422)
+    approvals = base["predicate"]["consent"]["approvals"]
+    add("C6_unlisted_approver", re_signed({"predicate.consent.approvals": [{**approvals[0], "party": UNLISTED},
+                                                                           *approvals[1:]]}),
+        "Like sim_A, but no approval comes from an email on the dev list", "P---PF", dev=422)
 
-    tampered = bytearray(base64.b64decode(model_owner_approval["signature"]))
-    tampered[0] ^= 1
-    add("C6_consent_sig", re_signed({"predicate.consent.approvals": [
-            {**model_owner_approval, "signature": b64(bytes(tampered))}, benchmark_owner_approval]}),
-        "One approval signature altered, re-signed", "P---PnF", dev=422)
-    add("C7_consent_party", re_signed({"predicate.consent.approvals": [
-            model_owner_approval, approval(spec.BENCHMARK_OWNER, ed25519("outsider"), manifest)]}),
-        "Approval by a key not listed in parties, re-signed", "P---PnF", dev=422)
-    add("C7b_party_mismatch", re_signed({"predicate.consent.approvals": [
-            {**benchmark_owner_approval, "party": spec.MODEL_OWNER}, benchmark_owner_approval]}),
-        f"Approval with party {spec.MODEL_OWNER}, signed by the {spec.BENCHMARK_OWNER} party's key, re-signed",
-        "P---PnF", dev=422)
-    add("C7c_one_party", re_signed({"predicate.consent.approvals": [model_owner_approval]}),
-        f"Only the {spec.MODEL_OWNER} approval present, re-signed", "P---PnF", dev=422)
-    # Consent is exactly two approvals, one per owner: a third FAILs even when it verifies.
-    add("C7d_duplicate_approval", re_signed({"predicate.consent.approvals": [
-            model_owner_approval, benchmark_owner_approval, model_owner_approval]}),
-        f"The {spec.MODEL_OWNER} approval listed twice, re-signed", "P---PnF", dev=422)
-    add("C7e_third_party_approval", re_signed({"predicate.consent.approvals": [
-            model_owner_approval, benchmark_owner_approval, approval("compute", ed25519("compute"), manifest)]}),
-        "Both owners' approvals plus a valid one from the compute party, re-signed", "P---PnF", dev=422)
-    unlisted = ed25519("eval-owner:unlisted")  # must never be listed in registry-policy.dev.example.yaml
-    add("C14_unlisted_bo", re_signed({
-            f"predicate.parties.{owner_index}.identity.publicKey": public_bytes(unlisted).hex(),
-            "predicate.consent.approvals": [model_owner_approval, approval(spec.BENCHMARK_OWNER, unlisted, manifest)]}),
-        f"Like sim_A, but the {spec.BENCHMARK_OWNER} party and its approval use a key not in the dev policy",
-        "P---PnP", dev=403)
+    # OpenMined's real hardware report, stapled onto receipts signed with fixture key B: checks 3 and 4
+    # can PASS, but the report commits to OpenMined's crypto_material, not B's, so check 2 FAILs.
+    report = key_binding(base)["cpu_evidence"]["report_base64"]
+    raw_report = base64.b64decode(report, validate=True)
 
-    # Real SEV-SNP reports, stapled onto receipts signed with fixture key A: checks 3 and 4 can PASS,
-    # but nothing binds key A to the report, so check 2 FAILs (the replay/stapling test).
-    dbe, router = live_capture("dbe"), live_capture("router")
-    if dbe is None or router is None:
-        print(f"skipped stapled_B, C8, C9, C11, C12, C13: a capture in {TINFOIL.relative_to(ROOT)} is missing; "
+    def stapled(report_b64: str, repo: str, tag: str) -> bytes:
+        statement = changed(base, {"predicate.execution.attestation.referenceValue.repo": spec.REFERENCE_REPO_PREFIX + repo,
+                                   "predicate.execution.attestation.referenceValue.tag": tag})
+        return sealed(statement, ed25519("B"), report=report_b64)
+
+    add("stapled_B", stapled(report, **release),
+        "OpenMined's statement with its real report, but crypto_material names fixture key B, which signs",
+        "PFPPPP", dev=422, strict=422, network=True)
+    flipped_report = bytearray(raw_report)
+    flipped_report[raw_report.index(Report(raw_report).measurement)] ^= 1
+    add("C8_report_flip", stapled(b64(bytes(flipped_report)), **release),
+        "stapled_B with one measurement byte flipped in the report", "PFFFPP", dev=422, network=True)
+    garbage = hashlib.shake_256(b"fpr-fixture:garbage-report").digest(len(raw_report))
+    add("C9_garbage_report", stapled(b64(garbage), **release),  # rejected while parsing, before any fetch
+        "stapled_B with report_base64 = base64 of random bytes (not a sentinel)", "PFFFPP", dev=422)
+    router = live_capture("router")
+    if router is None:
+        print(f"skipped C11, C12: {TINFOIL.relative_to(ROOT)}/router.* is missing; "
               "run scripts/capture_tinfoil_reports.py", file=sys.stderr)
     else:
-        (dbe_report, dbe_release), (router_report, router_release) = dbe, router
-
-        def stapled(report: bytes, release: dict) -> bytes:
-            statement = in_simulated_enclave(base, key_a)
-            attestation = statement["predicate"]["execution"]["attestation"]
-            attestation["quote"] = b64(report)
-            attestation["referenceValue"] = {**attestation["referenceValue"],
-                                             "repo": spec.REFERENCE_REPO_PREFIX + release["repo"],
-                                             "tag": release["tag"]}
-            return envelope(rfc8785.dumps(statement), key_a)
-
-        add("stapled_B", stapled(dbe_report, dbe_release),
-            "Worked example with the live DBE report as its quote and the live release's tag, signed with key A",
-            "PFPPPnP", dev=422, strict=422, network=True)
-        flipped_report = bytearray(dbe_report)
-        flipped_report[dbe_report.index(Report(dbe_report).measurement)] ^= 1
-        add("C8_report_flip", stapled(bytes(flipped_report), dbe_release),
-            "stapled_B with one measurement byte flipped in the raw report, re-signed", "PFFFPnP", dev=422, network=True)
-        garbage = hashlib.shake_256(b"fpr-fixture:garbage-quote").digest(len(dbe_report))
-        add("C9_garbage_quote", stapled(garbage, dbe_release),  # rejected while parsing, before any fetch
-            "stapled_B with quote = base64 of random bytes (not a sentinel), re-signed", "PFFFPnP", dev=422)
-        add("C11_untrusted_repo", stapled(router_report, router_release),
-            "The live router report, with referenceValue naming the router repo (not in trusted_code)",
-            "PFPFPnP", dev=422, network=True)
-        add("C12_repo_mismatch", stapled(router_report, dbe_release),
-            "The live router report, with referenceValue naming DBE and DBE's live tag", "PFPFPnP", dev=422,
+        router_report, router_release = router
+        add("C11_untrusted_repo", stapled(b64(router_report), router_release["repo"], router_release["tag"]),
+            "Tinfoil's live router report, with referenceValue naming the router repo (not in trusted_code)",
+            "PFPFPP", dev=422, network=True)
+        add("C12_repo_mismatch", stapled(b64(router_report), **release),
+            "Tinfoil's live router report, with referenceValue naming OpenMined's repo and tag", "PFPFPP", dev=422,
             network=True)
-        add("C13_tag_missing", stapled(dbe_report, {**dbe_release, "tag": MISSING_TAG}),
-            f"stapled_B with referenceValue.tag {MISSING_TAG}: no release asset", "PFPFPnP", dev=422, network=True)
+    add("C13_tag_missing", stapled(report, release["repo"], MISSING_TAG),
+        f"stapled_B with referenceValue.tag {MISSING_TAG}: no release asset", "PFPFPP", dev=422, network=True)
 
     add("U1_predicate_type", re_signed({"predicateType": FOREIGN_PREDICATE_TYPE}),
         "predicateType changed, re-signed", dev=400)
@@ -335,7 +301,7 @@ def build() -> tuple[dict[str, bytes], dict]:
     duplicated = rfc8785.dumps(sim_a)
     duplicated = b'{"predicateType":' + json.dumps(FOREIGN_PREDICATE_TYPE).encode() + b"," + duplicated[1:]
     add("U4_duplicate_key", envelope(duplicated, key_a),
-        "Statement with two predicateType keys (another type first, EvalResult last), signed", dev=400)
+        "Statement with two predicateType keys (another type first, the receipt's last), signed", dev=400)
     add("U5_two_signatures", envelope(rfc8785.dumps(sim_a), key_a, ed25519("X")),
         "sim_A's statement signed by two keys", dev=400)
     if DBE_SAMPLE.exists():
@@ -343,105 +309,90 @@ def build() -> tuple[dict[str, bytes], dict]:
             dev=400, path=str(DBE_SAMPLE.relative_to(ROOT)))
     else:
         print(f"skipped U6_dbe_sample: {DBE_SAMPLE.relative_to(ROOT)} is missing", file=sys.stderr)
+    add("U7_unsigned_statement", UNSIGNED.read_bytes(), "OpenMined's statement without its DSSE envelope",
+        dev=400, path=str(UNSIGNED.relative_to(ROOT)))
 
     add("S1_no_reference_value", re_signed({"predicate.execution.attestation.referenceValue": DELETE}),
         "No referenceValue, re-signed", dev=422)
-    add("S2_worked_example_roles", sealed(json.loads(WORKED_EXAMPLE.read_text()), key_a),
-        f"The worked example's role names only (no {spec.MODEL_OWNER} or {spec.BENCHMARK_OWNER}), re-signed", dev=422)
-    second_owner = {"role": spec.BENCHMARK_OWNER,
-                    "identity": {"scheme": spec.ED25519_KEY_SCHEME,
-                                 "publicKey": public_bytes(ed25519("eval-owner:second")).hex()}}
-    add("S3_two_benchmark_owners", re_signed({"predicate.parties": base["predicate"]["parties"] + [second_owner]}),
-        f"Two {spec.BENCHMARK_OWNER} parties, re-signed", dev=422)
-    second_model_owner = {"role": spec.MODEL_OWNER,
-                          "identity": {"scheme": spec.ED25519_KEY_SCHEME,
-                                       "publicKey": public_bytes(ed25519("weights-owner:second")).hex()}}
-    add("S4_two_model_owners", re_signed({"predicate.parties": base["predicate"]["parties"] + [second_model_owner]}),
-        f"Two {spec.MODEL_OWNER} parties, re-signed", dev=422)
-    model_owner_index = [p["role"] for p in base["predicate"]["parties"]].index(spec.MODEL_OWNER)
-    add("S5_same_owner_key", re_signed({
-            f"predicate.parties.{model_owner_index}.identity": base["predicate"]["parties"][owner_index]["identity"]}),
-        f"The {spec.MODEL_OWNER} party given the {spec.BENCHMARK_OWNER} party's key, re-signed", dev=422)
+    add("S2_no_consent", re_signed({"predicate.consent": DELETE}), "No consent, re-signed", dev=422)
+    material = json.loads(base64.b64decode(key_binding(sim_a)["crypto_material"]))
+    material["items"] = [item for item in material["items"] if item["id"] != spec.SIGNING_KEY_ID]
+    no_signing_key = changed(sim_a, {"predicate.execution.attestation.keyBinding.crypto_material":
+                                     b64(rfc8785.dumps(material))})
+    add("S3_no_signing_key", envelope(rfc8785.dumps(no_signing_key), key_a),
+        f"sim_A with no {spec.SIGNING_KEY_ID} in crypto_material, signed with key A", dev=422)
 
-    # D1-D8: synthetic variety (3 base weights, 5 systems, 3 evals). Every label says "synthetic".
-    alpha = component("base_weights", "modelwrap/2", "alpha", "synthetic-alpha-7b", alsoKnownAs=[
-        {"scheme": "hf-revision/1", "ref": "example-org/synthetic-alpha-7b@" + synthetic_digest("hf:alpha")[:40]}])
-    beta = component("base_weights", "modelwrap/2", "beta", "synthetic-beta-13b")
-    gamma_digest = component("base_weights", "modelwrap/2", "gamma", "synthetic-gamma-70b")
+    # D1-D7: synthetic variety (3 base models, 6 systems, 3 eval datasets). Every subject says "synthetic".
+    def hf(label: str) -> list:
+        return [{"scheme": "hf-revision/1", "ref": f"example-org/{label}@" + synthetic_digest(f"hf:{label}")[:40]}]
 
-    def gamma(oms_label):  # D6 and D7 share these weights but claim different OpenSSF Model Signing digests
-        return {**gamma_digest, "alsoKnownAs": [{"scheme": "oms/1", "digest": synthetic_digest(oms_label)}]}
+    alpha = model(spec.BASE_MODEL_ROLE, "alpha", "synthetic-alpha-7b", alsoKnownAs=hf("synthetic-alpha-7b"))
+    beta = model(spec.BASE_MODEL_ROLE, "beta", "synthetic-beta-13b")
 
-    runtime = component("runtime_image", spec.OCI_SCHEME, "runtime-1", "synthetic-runtime 1.0")
-    runtime_2 = component("runtime_image", spec.OCI_SCHEME, "runtime-2", "synthetic-runtime 2.0")
-    greedy = component("sampling", "jcs-sha256/1", "greedy", "temperature=0.0 (synthetic)")
-    warm = component("sampling", "jcs-sha256/1", "warm", "temperature=0.7 (synthetic)")
-    guard = component("safeguard", "dirhash-sha256/1", "filter", "synthetic-filter")
-    # Two adapters, listed against their sort order, so a role-only sort would hash them differently.
-    adapters = sorted([component("adapter", "dirhash-sha256/1", f"adapter-{i}", f"synthetic-adapter-{i}")
-                       for i in (1, 2)], key=lambda c: c["digest"], reverse=True)
+    def gamma(revision: str) -> dict:  # D5 and D6 share these weights but claim different revisions
+        return model(spec.BASE_MODEL_ROLE, "gamma", "synthetic-gamma-70b", alsoKnownAs=hf(revision))
 
-    refusal = evaluation("refusal", "Synthetic refusal eval (synthetic)", True, "1.0.0")
-    bio = evaluation("bio", "Synthetic bio-risk screen (synthetic)", False, "2.1.0")
-    honesty = evaluation("honesty", "Synthetic honesty probe (synthetic)", False, "0.3.0")
-    # Fixed key labels, deliberately not built from spec names: the dev policy lists these keys,
-    # so they must survive a party rename.
-    owner = {name: ed25519(f"weights-owner:{name}") for name in ("alpha", "beta", "gamma")}
-    judge = {name: ed25519(f"eval-owner:{name}") for name in ("refusal", "bio", "honesty")}
+    adapter = model("adapter", "refusal-tuned", "synthetic-refusal-adapter", appliesTo=[spec.BASE_MODEL_ROLE])
+    script_adapter = model("adapter", "script", "<script>alert(1)</script>", appliesTo=[spec.BASE_MODEL_ROLE])
+    greedy = sampling("greedy", max_new_tokens=64, temperature=0.0)
+    warm = sampling("warm", max_new_tokens=64, temperature=0.7, top_k=40)
+
+    refusal = dataset("refusal", "synthetic-refusal-prompts")
+    bio = dataset("bio", "synthetic-bio-risk-screen")
+    honesty = dataset("honesty", "synthetic-honesty-probe")
+    # The dev policy lists the judges' emails; the weights owners' are never listed.
+    judge = {name: f"{name}-evals@example.org" for name in ("refusal", "bio", "honesty")}
+    owner = {name: f"{name}-weights@example.org" for name in ("alpha", "beta", "gamma")}
     counts = {"submitted": 1200, "completed": 1200, "failed": 0}
-    script_name = "<script>alert(1)</script>"
+
+    def metric(name: str, value, unit: str, higher_is_better: bool) -> dict:
+        return {"name": name, "value": value, "unit": unit, "n": 1200, "higherIsBetter": higher_is_better}
 
     records = [
-        synthetic(1, "synthetic-alpha-7b (synthetic)", [alpha, runtime, greedy], refusal,
-                  (owner["alpha"], judge["refusal"]),
-                  {"metrics": [{"name": "refusal_rate", "value": 0.97, "unit": "fraction"},
-                               {"name": "unsafe_rate", "value": 0.004, "unit": "fraction"}],
-                   "counts": counts, "scored": True}),
-        synthetic(2, "synthetic-alpha-7b (synthetic)", [alpha, runtime, greedy], bio,
-                  (owner["alpha"], judge["bio"]), {"metrics": [], "counts": counts, "scored": False}),
-        synthetic(3, "synthetic-alpha-7b + synthetic-filter (synthetic)", [alpha, guard, runtime, greedy], refusal,
-                  (owner["alpha"], judge["refusal"]), {"metrics": []}),
-        synthetic(4, "synthetic-beta-13b (synthetic)", [beta, runtime, warm], refusal,
-                  (owner["beta"], judge["refusal"]), {"metrics": [], "scored": True}),
-        synthetic(5, "synthetic-beta-13b + two adapters (synthetic)", [beta, *adapters, runtime, warm], bio,
-                  (owner["beta"], judge["bio"]), {"metrics": [], "scored": False}),
-        synthetic(6, "synthetic-gamma-70b (synthetic)", [gamma("oms:gamma-a"), runtime_2, greedy], honesty,
-                  (owner["gamma"], judge["honesty"]),
+        synthetic(1, "synthetic-alpha-7b (synthetic)", [alpha], [greedy], refusal, (judge["refusal"], owner["alpha"]),
+                  {"metrics": [metric("refusal_rate", 0.97, "fraction", True),
+                               metric("unsafe_completion_rate", 0.004, "fraction", False)], "counts": counts}, sim_a),
+        synthetic(2, "synthetic-alpha-7b (synthetic)", [alpha], [greedy], bio, (judge["bio"], owner["alpha"]),
+                  {"metrics": [], "counts": counts}, sim_a),
+        synthetic(3, "synthetic-alpha-7b + synthetic-refusal-adapter (synthetic)", [alpha, adapter], [greedy],
+                  refusal, (judge["refusal"], owner["alpha"]), {"metrics": []}, sim_a),
+        synthetic(4, "synthetic-beta-13b (synthetic)", [beta], [warm], refusal, (judge["refusal"], owner["beta"]),
+                  {"metrics": []}, sim_a),
+        synthetic(5, "synthetic-gamma-70b (synthetic)", [gamma("synthetic-gamma-70b-a")], [greedy], honesty,
+                  (judge["honesty"], owner["gamma"]),
                   {"metrics": [{"name": "honesty_score", "value": "0.79"},
-                               {"name": "calibration", "value": {"ece": 0.05, "bins": 10}}],
-                   "scored": True}),
-        synthetic(7, "synthetic-gamma-70b (synthetic)", [gamma("oms:gamma-b"), runtime_2, greedy], refusal,
-                  (owner["gamma"], judge["refusal"]), {"metrics": []}),
-        synthetic(8, "synthetic-alpha-7b (synthetic)", [alpha, runtime, {**greedy, "name": script_name}], honesty,
-                  (owner["alpha"], judge["honesty"]), {"metrics": []}),
+                               {"name": "calibration", "value": {"ece": 0.05, "bins": 10}}]}, sim_a),
+        synthetic(6, "synthetic-gamma-70b (synthetic)", [gamma("synthetic-gamma-70b-b")], [greedy], refusal,
+                  (judge["refusal"], owner["gamma"]), {"metrics": []}, sim_a),
+        synthetic(7, "synthetic-alpha-7b + a scripted adapter (synthetic)", [alpha, script_adapter], [greedy],
+                  honesty, (judge["honesty"], owner["alpha"]), {"metrics": []}, sim_a),
     ]
     descriptions = {
         1: "Synthetic; two metrics",
-        2: "Synthetic; same system as D1, another eval; not scored",
-        3: "Synthetic; D1's model behind a safeguard",
-        4: "Synthetic; a second base model; scored, but no metrics reported",
-        5: "Synthetic; two adapter components (sort tie-break)",
-        6: "Synthetic; metrics incl. a non-{name,value} item; oms/1 alias A",
-        7: "Synthetic; same weights as D6 with a conflicting oms/1 alias",
-        8: "Synthetic; a component named <script>alert(1)</script>",
+        2: "Synthetic; same system as D1, another eval dataset; no metrics",
+        3: "Synthetic; D1's model with an adapter",
+        4: "Synthetic; a second base model",
+        5: "Synthetic; metrics incl. a non-{name,value,unit} item; hf-revision alias A",
+        6: "Synthetic; same weights as D5 with a conflicting hf-revision alias",
+        7: "Synthetic; a component named <script>alert(1)</script>",
     }
     for n, statement in enumerate(records, start=1):
-        add(f"D{n}", sealed(statement, ed25519(f"run:D{n}")), descriptions[n], "P---PnP")
+        add(f"D{n}", sealed(statement, ed25519(f"run:D{n}")), descriptions[n], "P---PP")
 
     return files, expected
 
 
-def benchmark_owner_keys(files: dict[str, bytes], expected: dict) -> dict[str, list[str]]:
-    """{benchmark owner's public key: the fixtures that use it}, over the schema-valid fixtures."""
-    keys = {}
+def approver_emails(files: dict[str, bytes], expected: dict) -> dict[str, list[str]]:
+    """{approver email: the fixtures whose consent lists it}, over the schema-valid fixtures."""
+    emails = {}
     for name, entry in expected.items():
         if entry["checks"] is None:
             continue
-        payload = base64.b64decode(json.loads(files[f"{name}.dsse.json"])["payload"])
-        parties = json.loads(payload)["predicate"]["parties"]
-        key, = (p["identity"]["publicKey"] for p in parties if p["role"] == spec.BENCHMARK_OWNER)
-        keys.setdefault(key, []).append(name)
-    return keys
+        data = files.get(f"{name}.dsse.json") or (ROOT / entry["record"]).read_bytes()
+        statement = json.loads(base64.b64decode(json.loads(data)["payload"]))
+        for approval in statement["predicate"]["consent"]["approvals"]:
+            emails.setdefault(approval["party"], []).append(name)
+    return emails
 
 
 def main() -> int:
@@ -453,9 +404,9 @@ def main() -> int:
     for name, entry in expected.items():
         print(f"{name:24} {entry['recordId'][:16]}  dev {entry['dev']['status']}")
     print(f"wrote {len(files)} fixtures to {GENERATED.relative_to(ROOT)} and {EXPECTED.relative_to(ROOT)}")
-    print(f"\n{spec.BENCHMARK_OWNER} keys, for registry-policy.dev.example.yaml (list all but C14_unlisted_bo's):")
-    for key, names in benchmark_owner_keys(files, expected).items():
-        print(f"  {key}  {', '.join(names)}")
+    print(f"\napprover emails, for registry-policy.dev.example.yaml (list one per fixture, never {UNLISTED}):")
+    for email, names in approver_emails(files, expected).items():
+        print(f"  {email}  {', '.join(names)}")
     return 0
 
 

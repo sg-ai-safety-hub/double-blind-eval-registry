@@ -8,19 +8,18 @@ import re
 import runpy
 
 import pytest
+import rfc8785
 from fixture_data import CHECKED, DEV_POLICY, EXPECTED, ROOT, record
 
 from registry import spec
-from registry.checks_software import eval_digest, pipeline_digest
 from registry.config import load_config
 from registry.envelope import Unrecognized, parse_receipt
-from registry.evalresult import SchemaError, parse_statement
 from registry.model import Status
+from registry.syft_receipt import SchemaError, parse_statement
 
-WORKED_EXAMPLE = ROOT / "fixtures/evalresult/worked_example.statement.json"
 UNRECOGNIZED = {name for name, e in EXPECTED.items() if e["dev"]["status"] == 400}
 SCHEMA_INVALID = {name for name, e in EXPECTED.items() if e["dev"]["status"] == 422 and e["checks"] is None}
-# What each unrecognised fixture's rejection must say.
+# What each rejected fixture's rejection must say.
 REASONS = {
     "U1_predicate_type": "statement: predicateType: Input should be",
     "U2_payload_type": "payloadType must be",
@@ -28,13 +27,16 @@ REASONS = {
     "U4_duplicate_key": 'duplicate key "predicateType"',
     "U5_two_signatures": "exactly one signature, got 2",
     "U6_dbe_sample": "envelope: payload: Field required",
+    "U7_unsigned_statement": "signatures: Field required",
     "S1_no_reference_value": "referenceValue: Field required",
-    "S2_worked_example_roles": "exactly one party with role",
-    "S3_two_benchmark_owners": "exactly one party with role",
-    "S4_two_model_owners": f"exactly one party with role {spec.MODEL_OWNER!r}, got 2",
-    "S5_same_owner_key": f"the {spec.MODEL_OWNER!r} and {spec.BENCHMARK_OWNER!r} parties must have different keys",
+    "S2_no_consent": "predicate.consent: Field required",
+    "S3_no_signing_key": f"exactly one {spec.SIGNING_KEY_ID!r} item, got 0",
 }
-UNLISTED = "C14_unlisted_bo"  # its benchmark-owner key must stay off the dev policy (403)
+UNLISTED = "C6_unlisted_approver"  # no approver of it may be on the dev policy
+
+
+def statement(name: str) -> dict:
+    return parse_receipt(record(name)).statement
 
 
 def test_regenerating_reproduces_the_committed_fixtures():
@@ -68,49 +70,40 @@ def test_schema_invalid_fixtures_are_recognized_then_rejected_with_their_reason(
         parse_statement(receipt.statement)
 
 
-def test_dev_example_policy_lists_every_fixture_benchmark_owner_except_the_unlisted_one():
-    listed = {owner.public_key for owner in
-              load_config({"REGISTRY_POLICY": str(DEV_POLICY)}).policy.benchmark_owners}
-    used = {}
+def test_dev_example_policy_lists_an_approver_of_every_fixture_except_the_unlisted_one():
+    listed = {owner.email for owner in load_config({"REGISTRY_POLICY": str(DEV_POLICY)}).policy.benchmark_owners}
+    used = set()
     for name in CHECKED:
-        parties = parse_statement(parse_receipt(record(name)).statement).predicate.parties
-        owner, = (party for party in parties if party.role == spec.BENCHMARK_OWNER)
-        used.setdefault(owner.identity.publicKey, set()).add(name)
-    unlisted_key, = (key for key, names in used.items() if UNLISTED in names)
-    assert used[unlisted_key] == {UNLISTED}
-    assert listed == set(used) - {unlisted_key}
+        approvers = {approval["party"] for approval in statement(name)["predicate"]["consent"]["approvals"]}
+        assert bool(approvers & listed) == (name != UNLISTED), name
+        used |= approvers
+    assert listed <= used  # nothing listed that no fixture needs
 
 
 @pytest.mark.parametrize("name", sorted(CHECKED))
 def test_checked_fixtures_pass_recognition_and_schema(name):
-    parse_statement(parse_receipt(record(name)).statement)
+    parse_statement(statement(name))
 
 
 @pytest.mark.parametrize("name", sorted(CHECKED))
-def test_derived_digests_match_the_expected_check_5(name):
-    predicate = parse_receipt(record(name)).statement["predicate"]
-    subject = parse_receipt(record(name)).statement["subject"][0]["digest"]["sha256"]
-    recomputed = pipeline_digest(predicate["system"]["components"])
-    holds = (recomputed == predicate["system"]["pipelineDigest"] == subject
-             and eval_digest(predicate["eval"]["evalSet"], predicate["eval"]["harness"]) == predicate["eval"]["evalDigest"])
+def test_the_subject_digest_matches_the_expected_check_5(name):
+    s = statement(name)
+    holds = hashlib.sha256(rfc8785.dumps(s["predicate"]["evalPipeline"])).hexdigest() == s["subject"][0]["digest"]["sha256"]
     assert holds == (EXPECTED[name]["checks"]["digests"] == Status.PASS)
 
 
-def test_sim_a_differs_from_the_worked_example_only_in_execution_and_party_roles():
-    envelope = json.loads(record("sim_A"))
-    sim_a = json.loads(base64.b64decode(envelope["payload"], validate=True))
-    example = json.loads(WORKED_EXAMPLE.read_text())
-    differences = set(_diff(example, sim_a))
-    assert differences == {
-        "predicate.execution.runPublicKey",
-        "predicate.execution.attestation.quote",
-        "predicate.execution.attestation.measurement",
-        "predicate.execution.attestation.reportData",
-        "predicate.parties.0.role",
-        "predicate.parties.1.role",
+def test_sim_a_differs_from_openmined_s_statement_only_in_its_key_binding_and_unread_parts():
+    sim_a = statement("sim_A")
+    openmined = statement("om_receipt")
+    assert set(_diff(openmined, sim_a)) == {
+        "predicate.execution.attestation.keyBinding.crypto_material",  # names fixture key A
+        "predicate.execution.attestation.keyBinding.cpu_evidence.report_base64",  # SIMULATED
+        "predicate.execution.attestation.keyBinding.collateral",  # left out: bulky, never read
+        "predicate.job.code.0.content",
+        "predicate.outputs.0.content",
     }
-    roles = [party["role"] for party in sim_a["predicate"]["parties"]]
-    assert roles[:2] == [spec.MODEL_OWNER, spec.BENCHMARK_OWNER]
+    material = json.loads(base64.b64decode(sim_a["predicate"]["execution"]["attestation"]["keyBinding"]["crypto_material"]))
+    assert [item["id"] for item in material["items"]] == ["tls", "hpke", spec.SIGNING_KEY_ID]
 
 
 def _diff(a, b, path=""):

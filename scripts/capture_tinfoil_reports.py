@@ -23,7 +23,7 @@ from tinfoil.attestation import PredicateType, fetch_bundle_from
 from tinfoil.client import DEFAULT_CONFIG_REPO
 from tinfoil.github import fetch_latest_release
 
-from registry.evalresult import TIMESTAMP_FORMAT
+from registry.ingest import TIMESTAMP_FORMAT
 
 ROOT = Path(__file__).resolve().parents[1]
 TINFOIL = ROOT / "fixtures/tinfoil"

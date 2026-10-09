@@ -1,7 +1,7 @@
 [project]
 name = "double-blind-eval-registry"
 version = "0.1.0"
-description = "Double Blind Eval Registry: a local web app that verifies and indexes EvalResult receipts."
+description = "Double Blind Eval Registry: a local web app that verifies and indexes AI-evaluation receipts."
 requires-python = "~=3.12.0"
 dependencies = [
     "flask==3.1.3",
