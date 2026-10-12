@@ -181,7 +181,7 @@ def test_optional_parts_may_be_absent():
     predicate = statement["predicate"]
     del statement["subject"][0]["name"]
     for model in predicate["evalPipeline"]["models"]:
-        model.pop("name"), model.pop("alsoKnownAs", None)
+        model.pop("name"), model.pop("alsoKnownAs", None), model.pop("params", None)
     del predicate["evalPipeline"]["config"]
     del predicate["evalDataset"]["name"]
     del predicate["results"]["counts"]
@@ -198,6 +198,24 @@ def test_extra_fields_are_allowed():
     statement["predicate"]["execution"]["attestation"]["gpu"] = {"type": "nvidia-cc"}
     statement["predicate"]["evalPipeline"]["models"][0]["license"] = "x"
     parse_statement(statement)
+
+
+def test_pipeline_entries_keep_their_params():
+    pipeline = receipt()["predicate"]["evalPipeline"]
+    parsed = parse_statement(receipt()).predicate.evalPipeline
+    assert [m.params for m in parsed.models] == [m.get("params") for m in pipeline["models"]]
+    assert [c.params for c in parsed.config] == [c.get("params") for c in pipeline["config"]]
+    assert parsed.models[0].params is None and parsed.config[0].params is not None
+
+
+@pytest.mark.parametrize("path", ["predicate.evalPipeline.models.0.params", "predicate.evalPipeline.config.0.params"])
+@pytest.mark.parametrize("value", [[1, 2], "temperature=0.8", 0.8], ids=["list", "string", "number"])
+def test_params_must_be_an_object(path, value):
+    invalid(changed(path, value), "params")
+
+
+def test_param_values_are_opaque():
+    parse_statement(changed("predicate.evalPipeline.config.0.params", {"stop": ["\n"], "extra": {"a": None}, "t": 0.8}))
 
 
 def test_also_known_as_needs_a_digest_or_ref():
@@ -312,6 +330,12 @@ def test_the_adapter_maps_the_pipeline_s_models_then_its_config_as_components():
     assert record["components"][0]["alsoKnownAs"] == [
         {"scheme": a["scheme"], "value": a["ref"]} for a in pipeline["models"][0]["alsoKnownAs"]]
     assert record["components"][1]["alsoKnownAs"] == []
+
+
+def test_the_adapter_keeps_each_component_s_params_as_given():
+    pipeline = receipt()["predicate"]["evalPipeline"]
+    assert [c["params"] for c in indexed()["components"]] == [
+        *(m.get("params") for m in pipeline["models"]), *(c.get("params") for c in pipeline["config"])]
 
 
 def test_an_also_known_as_digest_becomes_its_value():

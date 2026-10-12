@@ -17,7 +17,7 @@ fields and allows any others:
 
 | Field | What it says |
 |---|---|
-| `evalPipeline` | what was evaluated: `models` (the `base` model, adapters, classifiers…) and `config` (sampling settings…), each by digest. The statement's subject is sha256 of this object's JCS. |
+| `evalPipeline` | what was evaluated: `models` (the `base` model, adapters, classifiers…) and `config` (sampling settings…), each by digest, with optional `params` (such as sampling's temperature) shown as given. The statement's subject is sha256 of this object's JCS. |
 | `evalDataset` | the eval dataset, by digest |
 | `results` | the metrics and item counts |
 | `execution` | when it ran, and the hardware attestation: `referenceValue`, the GitHub release whose Sigstore-signed measurement the enclave should match, and `keyBinding`, Tinfoil's [attested keys](https://docs.tinfoil.sh/containers/attested-keys): an AMD SEV-SNP report whose `report_data` commits to `crypto_material`, which holds the enclave's Ed25519 signing key |

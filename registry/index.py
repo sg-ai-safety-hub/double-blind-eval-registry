@@ -48,7 +48,7 @@ CREATE TABLE records (
   received_at TEXT NOT NULL,
   size INTEGER NOT NULL);
 CREATE TABLE components (record_id TEXT NOT NULL REFERENCES records ON DELETE CASCADE,
-  role TEXT NOT NULL, scheme TEXT NOT NULL, digest TEXT NOT NULL, name TEXT, aka_json TEXT);
+  role TEXT NOT NULL, scheme TEXT NOT NULL, digest TEXT NOT NULL, name TEXT, aka_json TEXT, params_json TEXT);
 CREATE INDEX ix_rec_sys ON records(system_digest);
 CREATE INDEX ix_rec_eval ON records(eval_digest);
 CREATE INDEX ix_rec_bo ON records(benchmark_owner_email);
@@ -66,7 +66,8 @@ VALUES (:record_id, :predicate_type, :adapter_version, :state, :checks_json, :su
   :publication_json, :reported_json, :received_at, :size)
 ON CONFLICT (record_id) DO NOTHING
 """
-INSERT_COMPONENT = "INSERT INTO components (record_id, role, scheme, digest, name, aka_json) VALUES (?, ?, ?, ?, ?, ?)"
+INSERT_COMPONENT = ("INSERT INTO components (record_id, role, scheme, digest, name, aka_json, params_json) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)")
 COMPONENT_RECORDS = ("SELECT * FROM records WHERE record_id IN (SELECT record_id FROM components "
                      f"WHERE digest IN (:digest, :prefixed) AND (:role IS NULL OR role = :role)) {NEWEST_FIRST}")
 LOOKUPS = (  # tried in this order
@@ -108,6 +109,7 @@ class Component(Shape):
     digest: str
     name: str | None  # a label, shown only next to its digest
     also_known_as: tuple[Alias, ...]
+    params: dict[str, Any] | None  # its settings, such as sampling's temperature: opaque values, shown as given
 
 
 class Eval(Shape):
@@ -256,8 +258,10 @@ class Index:
         if not records:
             return None
         components = _grouped((c for r in records for c in r.components), lambda c: (c.role, c.scheme, c.digest))
+        # The subject digest covers evalPipeline, params included (check 5), so the records agree on params.
         return {"digest": digest, "subjectNames": _distinct(r.subject_name for r in records), "state": _rollup(records),
-                "components": [{"role": role, "scheme": scheme, "digest": digest_, **_labels(same)}
+                "components": [{"role": role, "scheme": scheme, "digest": digest_, **_labels(same),
+                                "params": same[0].params}
                                for (role, scheme, digest_), same in components.items()],
                 "records": [r.to_json() for r in records]}
 
@@ -340,7 +344,8 @@ def _record_row(record: IndexedRecord) -> dict:
 
 def _component_rows(record: IndexedRecord) -> list[tuple]:
     return [(record.record_id, c.role, c.scheme, c.digest, c.name,
-             _dumps([alias.model_dump(by_alias=True) for alias in c.also_known_as])) for c in record.components]
+             _dumps([alias.model_dump(by_alias=True) for alias in c.also_known_as]), _dumps(c.params))
+            for c in record.components]
 
 
 def _record(row: sqlite3.Row, components: list[sqlite3.Row]) -> IndexedRecord:
@@ -353,7 +358,7 @@ def _record(row: sqlite3.Row, components: list[sqlite3.Row]) -> IndexedRecord:
         "predicateType": row["predicate_type"], "adapterVersion": row["adapter_version"],
         "subjectName": row["subject_name"], "systemDigest": row["system_digest"],
         "components": [{"role": c["role"], "scheme": c["scheme"], "digest": c["digest"], "name": c["name"],
-                        "alsoKnownAs": _loads(c["aka_json"])} for c in components],
+                        "alsoKnownAs": _loads(c["aka_json"]), "params": _loads(c["params_json"])} for c in components],
         "eval": {"digest": row["eval_digest"], "evalSet": _loads(row["eval_set_json"]),
                  "harness": _loads(row["harness_json"]), "name": row["eval_name"],
                  "harnessVersion": row["harness_version"], "public": row["eval_public"]},

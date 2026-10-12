@@ -22,7 +22,7 @@ from registry.model import Accepted
 
 log = logging.getLogger(__name__)
 
-ADAPTER_VERSION = "syft-receipt-v3/1"  # stored with each indexed record: which version of to_index mapped it
+ADAPTER_VERSION = "syft-receipt-v3/2"  # stored with each indexed record: which version of to_index mapped it
 OCI_DIGEST = r"^sha256:[0-9a-f]{64}$"
 REPO = rf"^{re.escape(spec.REFERENCE_REPO_PREFIX)}{spec.GITHUB_OWNER_NAME}$"
 LOWER_HEX_BYTES = r"^(?:[0-9a-f]{2})+$"
@@ -74,15 +74,20 @@ class AlsoKnownAs(_Model):
         return self
 
 
+Params = dict[str, Any] | None  # opaque values, shown as given; check 5 covers them with the rest of evalPipeline
+
+
 class PipelineModel(SchemedDigest):
     role: NonEmpty
     name: str | None = None
     alsoKnownAs: list[AlsoKnownAs] | None = None
+    params: Params = None
 
 
 class PipelineConfig(SchemedDigest):
     kind: NonEmpty
     id: str | None = None
+    params: Params = None
 
 
 class EvalPipeline(_Model):
@@ -286,9 +291,11 @@ def to_index(statement: Statement, accepted: Accepted) -> index.IndexedRecord:
         components=(
             *(index.Component(role=m.role, scheme=m.scheme, digest=m.digest, name=m.name,
                               also_known_as=tuple(index.Alias(scheme=a.scheme, value=a.ref if a.digest is None else a.digest)
-                                                  for a in m.alsoKnownAs or ()))
+                                                  for a in m.alsoKnownAs or ()),
+                              params=m.params)
               for m in pipeline.models),
-            *(index.Component(role=c.kind, scheme=c.scheme, digest=c.digest, name=c.id, also_known_as=())
+            *(index.Component(role=c.kind, scheme=c.scheme, digest=c.digest, name=c.id, also_known_as=(),
+                              params=c.params)
               for c in pipeline.config),
         ),
         eval=index.Eval(digest=dataset.digest,

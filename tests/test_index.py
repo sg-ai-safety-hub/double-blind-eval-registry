@@ -137,6 +137,14 @@ def test_components_are_rows_of_their_own_in_receipt_order(index):
     assert [row[0] for row in rows] == [MODEL_ROLE, "adapter", "safety_classifier", "sampling"]
 
 
+def test_component_params_read_back(index):
+    added = indexed("om_receipt")
+    index.add(added)
+    assert [c.params for c in index.get(added.record_id).components] == [c.params for c in added.components]
+    assert next(c for c in added.components if c.role == "sampling").params == {
+        "max_new_tokens": 48, "temperature": 0.8, "top_k": 40}
+
+
 def test_recent_records_are_newest_first_and_limited(seeded):
     assert [r.record_id for r in seeded.recent(3)] == ids("D7", "D6", "D5")
 
@@ -161,6 +169,13 @@ def test_a_system_shows_its_components_with_their_labels(seeded):
     assert [a["scheme"] for a in base["alsoKnownAs"]] == ["hf-revision/1"] and base["akaConflicts"] is False
 
 
+def test_a_system_shows_its_components_params(seeded):
+    # Records of one system share its evalPipeline (check 5), so they give each component the same params.
+    view = seeded.system(indexed("D1").system_digest)
+    assert [c["params"] for c in view["components"]] == [c.params for c in indexed("D1").components]
+    assert view["components"][-1]["params"] is not None
+
+
 def test_an_unknown_system_is_none(seeded):
     assert seeded.system("ab" * 32) is None
 
@@ -178,7 +193,7 @@ def test_a_component_is_found_by_its_hex_digest_without_the_sha256_prefix(index)
     # OCI digests carry a sha256: prefix; a lookup is by the bare hex.
     d1 = indexed("D1")
     oci = Component(role="runtime", scheme=spec.OCI_SCHEME, digest="sha256:" + "cd" * 32, name="runtime 1.0",
-                    also_known_as=())
+                    also_known_as=(), params=None)
     index.add(d1.model_copy(update={"components": (*d1.components, oci)}))
     view = index.component("cd" * 32)
     assert (view["roles"], view["schemes"], view["names"]) == (["runtime"], [spec.OCI_SCHEME], ["runtime 1.0"])
