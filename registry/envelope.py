@@ -1,4 +1,4 @@
-"""Receipt recognition: is this an EvalResult/v0.1 statement in a DSSE envelope?
+"""Receipt recognition: is this a syft-enclave receipt v3 statement in a DSSE envelope?
 
 Anything unrecognised is a 400. Nothing here checks a signature (that is check 1), and
 nothing is re-serialised: the receipt keeps the raw bytes exactly as received.
@@ -33,18 +33,13 @@ class Receipt:
     statement: dict
 
 
-class _Predicate(BaseModel):
-    model_config = ConfigDict(strict=True)
-    version: Literal[spec.PREDICATE_VERSION]
-
-
 class StatementHeader(BaseModel):
-    """What makes a statement an EvalResult/v0.1. The schema (evalresult.py) checks the rest."""
+    """What makes a statement a syft-enclave receipt v3. The schema (syft_receipt.py) checks the rest."""
 
     model_config = ConfigDict(strict=True)
     type_: Literal[spec.STATEMENT_TYPE] = Field(alias="_type")
     predicateType: Literal[spec.PREDICATE_TYPE]
-    predicate: _Predicate
+    predicate: dict
 
 
 def parse_receipt(raw: bytes) -> Receipt:

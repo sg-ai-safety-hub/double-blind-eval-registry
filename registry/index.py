@@ -1,10 +1,10 @@
 """The index: what the registry lists. It is derived from the store and can be rebuilt from it.
 
 The store keeps each accepted record's bytes and never parses them. The index keeps IndexedRecord,
-the registry's own shape for an accepted record. That shape names no receipt format's fields: each
-receipt format has an adapter that maps its receipts into it (EvalResult/v0.1: evalresult.to_index).
-A changed or added format needs only its adapter and a rebuild (scripts/rebuild_index.py); this module
-and the store stay as they are.
+the registry's own shape for an accepted record. That shape names no receipt format's fields: the
+receipt format's adapter maps its receipts into it (syft-enclave receipt v3: syft_receipt.to_index).
+A changed format needs mostly its adapter and a rebuild (scripts/rebuild_index.py); the store stays
+as it is.
 
 SQLite through the standard library, one connection per call.
 """
@@ -20,11 +20,12 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
 
-from registry.model import Check, Enclave
+from registry import spec
+from registry.model import Check, Enclave, Publication
 
 log = logging.getLogger(__name__)
 
-MODEL_ROLE = "base_weights"  # the component role whose digest identifies a model
+MODEL_ROLE = spec.BASE_MODEL_ROLE  # the component role whose digest identifies a model
 DIGEST_PREFIX = "sha256:"  # OCI digests carry it; a component is looked up by its hex, with or without it
 STATES = ("incomplete", "verified")  # worst first: a rollup takes the worst state of its records
 NEWEST_FIRST = "ORDER BY received_at DESC, record_id"
@@ -36,35 +37,37 @@ CREATE TABLE records (
   state TEXT NOT NULL CHECK (state IN ('verified','incomplete')),
   checks_json TEXT NOT NULL,
   subject_name TEXT, system_digest TEXT NOT NULL, eval_digest TEXT NOT NULL,
-  eval_name TEXT, eval_public INTEGER, eval_set_json TEXT NOT NULL, harness_json TEXT NOT NULL,
+  eval_name TEXT, eval_public INTEGER, eval_set_json TEXT NOT NULL, harness_json TEXT,
   harness_version TEXT, metrics_json TEXT NOT NULL, counts_json TEXT, scored INTEGER,
   parties_json TEXT NOT NULL, consent_json TEXT NOT NULL,
-  benchmark_owner_key TEXT NOT NULL,
+  benchmark_owner_email TEXT NOT NULL,
   benchmark_owner_display TEXT NOT NULL,
   enclave_json TEXT,
+  publication_json TEXT,
   reported_json TEXT NOT NULL,
   received_at TEXT NOT NULL,
   size INTEGER NOT NULL);
 CREATE TABLE components (record_id TEXT NOT NULL REFERENCES records ON DELETE CASCADE,
-  role TEXT NOT NULL, scheme TEXT NOT NULL, digest TEXT NOT NULL, name TEXT, aka_json TEXT);
+  role TEXT NOT NULL, scheme TEXT NOT NULL, digest TEXT NOT NULL, name TEXT, aka_json TEXT, params_json TEXT);
 CREATE INDEX ix_rec_sys ON records(system_digest);
 CREATE INDEX ix_rec_eval ON records(eval_digest);
-CREATE INDEX ix_rec_bo ON records(benchmark_owner_key);
+CREATE INDEX ix_rec_bo ON records(benchmark_owner_email);
 CREATE INDEX ix_comp_digest ON components(digest);
 CREATE INDEX ix_comp_role ON components(role, digest);
 """
 INSERT_RECORD = """
 INSERT INTO records (record_id, predicate_type, adapter_version, state, checks_json, subject_name, system_digest,
   eval_digest, eval_name, eval_public, eval_set_json, harness_json, harness_version, metrics_json, counts_json, scored,
-  parties_json, consent_json, benchmark_owner_key, benchmark_owner_display, enclave_json, reported_json,
-  received_at, size)
+  parties_json, consent_json, benchmark_owner_email, benchmark_owner_display, enclave_json, publication_json,
+  reported_json, received_at, size)
 VALUES (:record_id, :predicate_type, :adapter_version, :state, :checks_json, :subject_name, :system_digest,
   :eval_digest, :eval_name, :eval_public, :eval_set_json, :harness_json, :harness_version, :metrics_json, :counts_json,
-  :scored, :parties_json, :consent_json, :benchmark_owner_key, :benchmark_owner_display, :enclave_json, :reported_json,
-  :received_at, :size)
+  :scored, :parties_json, :consent_json, :benchmark_owner_email, :benchmark_owner_display, :enclave_json,
+  :publication_json, :reported_json, :received_at, :size)
 ON CONFLICT (record_id) DO NOTHING
 """
-INSERT_COMPONENT = "INSERT INTO components (record_id, role, scheme, digest, name, aka_json) VALUES (?, ?, ?, ?, ?, ?)"
+INSERT_COMPONENT = ("INSERT INTO components (record_id, role, scheme, digest, name, aka_json, params_json) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)")
 COMPONENT_RECORDS = ("SELECT * FROM records WHERE record_id IN (SELECT record_id FROM components "
                      f"WHERE digest IN (:digest, :prefixed) AND (:role IS NULL OR role = :role)) {NEWEST_FIRST}")
 LOOKUPS = (  # tried in this order
@@ -106,12 +109,13 @@ class Component(Shape):
     digest: str
     name: str | None  # a label, shown only next to its digest
     also_known_as: tuple[Alias, ...]
+    params: dict[str, Any] | None  # its settings, such as sampling's temperature: opaque values, shown as given
 
 
 class Eval(Shape):
     digest: str
     eval_set: SchemedDigest
-    harness: SchemedDigest
+    harness: SchemedDigest | None
     name: str | None
     harness_version: str | None
     public: bool | None
@@ -131,14 +135,12 @@ class Results(Shape):
 
 class Party(Shape):
     role: str
-    scheme: str
-    public_key: str | None
-    name: str | None
+    email: str
 
 
 class Approval(Shape):
     party: str
-    public_key: str
+    approved_at: str | None
 
 
 class Consent(Shape):
@@ -158,7 +160,7 @@ class Reported(Shape):
 
 
 class Owner(Shape):
-    public_key: str  # from the receipt
+    email: str  # the first approver, in receipt order, on this registry's list
     display: str  # from this registry's policy, when the record was indexed
 
 
@@ -172,6 +174,7 @@ class IndexedRecord(Shape):
     state: Literal["verified", "incomplete"]
     checks: tuple[Check, ...]
     enclave: Enclave | None  # verified facts only: None unless checks 3 and 4 PASSed
+    publication: Publication | None  # where Rekor logs it: None unless check 7 PASSed
     benchmark_owner: Owner
     # What the receipt says, mapped by its format's adapter.
     predicate_type: str
@@ -249,14 +252,16 @@ class Index:
             return _load(conn, f"SELECT * FROM records {NEWEST_FIRST} LIMIT ?", (limit,))
 
     def system(self, digest: str) -> dict | None:
-        """A system (pipelineDigest): its components, with every label its records gave them, and its records."""
+        """A system (the subject digest): its components, with every label its records gave them, and its records."""
         with self._connect() as conn:
             records = _load(conn, f"SELECT * FROM records WHERE system_digest = ? {NEWEST_FIRST}", (digest,))
         if not records:
             return None
         components = _grouped((c for r in records for c in r.components), lambda c: (c.role, c.scheme, c.digest))
+        # The subject digest covers evalPipeline, params included (check 5), so the records agree on params.
         return {"digest": digest, "subjectNames": _distinct(r.subject_name for r in records), "state": _rollup(records),
-                "components": [{"role": role, "scheme": scheme, "digest": digest_, **_labels(same)}
+                "components": [{"role": role, "scheme": scheme, "digest": digest_, **_labels(same),
+                                "params": same[0].params}
                                for (role, scheme, digest_), same in components.items()],
                 "records": [r.to_json() for r in records]}
 
@@ -329,16 +334,18 @@ def _record_row(record: IndexedRecord) -> dict:
         "harness_version": eval_["harnessVersion"], "metrics_json": _dumps(results["metrics"]),
         "counts_json": _dumps(results["counts"]), "scored": results["scored"],
         "parties_json": _dumps(data["parties"]), "consent_json": _dumps(data["consent"]),
-        "benchmark_owner_key": record.benchmark_owner.public_key,
+        "benchmark_owner_email": record.benchmark_owner.email,
         "benchmark_owner_display": record.benchmark_owner.display,
-        "enclave_json": _dumps(data["enclave"]), "reported_json": _dumps(data["reported"]),
+        "enclave_json": _dumps(data["enclave"]), "publication_json": _dumps(data["publication"]),
+        "reported_json": _dumps(data["reported"]),
         "received_at": record.received_at, "size": record.size,
     }
 
 
 def _component_rows(record: IndexedRecord) -> list[tuple]:
     return [(record.record_id, c.role, c.scheme, c.digest, c.name,
-             _dumps([alias.model_dump(by_alias=True) for alias in c.also_known_as])) for c in record.components]
+             _dumps([alias.model_dump(by_alias=True) for alias in c.also_known_as]), _dumps(c.params))
+            for c in record.components]
 
 
 def _record(row: sqlite3.Row, components: list[sqlite3.Row]) -> IndexedRecord:
@@ -346,11 +353,12 @@ def _record(row: sqlite3.Row, components: list[sqlite3.Row]) -> IndexedRecord:
     return IndexedRecord.model_validate({
         "recordId": row["record_id"], "size": row["size"], "receivedAt": row["received_at"], "state": row["state"],
         "checks": _loads(row["checks_json"]), "enclave": _loads(row["enclave_json"]),
-        "benchmarkOwner": {"publicKey": row["benchmark_owner_key"], "display": row["benchmark_owner_display"]},
+        "publication": _loads(row["publication_json"]),
+        "benchmarkOwner": {"email": row["benchmark_owner_email"], "display": row["benchmark_owner_display"]},
         "predicateType": row["predicate_type"], "adapterVersion": row["adapter_version"],
         "subjectName": row["subject_name"], "systemDigest": row["system_digest"],
         "components": [{"role": c["role"], "scheme": c["scheme"], "digest": c["digest"], "name": c["name"],
-                        "alsoKnownAs": _loads(c["aka_json"])} for c in components],
+                        "alsoKnownAs": _loads(c["aka_json"]), "params": _loads(c["params_json"])} for c in components],
         "eval": {"digest": row["eval_digest"], "evalSet": _loads(row["eval_set_json"]),
                  "harness": _loads(row["harness_json"]), "name": row["eval_name"],
                  "harnessVersion": row["harness_version"], "public": row["eval_public"]},
@@ -395,11 +403,10 @@ def _component_view(digest: str, role: str | None, records: list[IndexedRecord])
 
 
 def _eval_view(digest: str, records: list[IndexedRecord]) -> dict:
-    # All records here share this evalDigest. Check 5 recomputed it for each, so they all name the same
-    # eval set and harness.
+    # All records here share this eval digest, so they name the same eval set.
     first = records[0].eval
     return {"digest": digest, "evalSet": first.eval_set.model_dump(by_alias=True),
-            "harness": first.harness.model_dump(by_alias=True),
+            "harness": None if first.harness is None else first.harness.model_dump(by_alias=True),
             "names": _distinct(r.eval.name for r in records),
             "harnessVersions": _distinct(r.eval.harness_version for r in records),
             "publicFlags": _distinct(r.eval.public for r in records),

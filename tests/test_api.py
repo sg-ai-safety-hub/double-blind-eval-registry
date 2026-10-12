@@ -5,13 +5,15 @@ import io
 from pathlib import Path
 
 import pytest
-from fixture_data import DEV_POLICY, EXPECTED, STRICT_POLICY, params, record
+from fixture_data import DEV_POLICY, EXPECTED, OPENMINED_LOG_INDEX, STRICT_POLICY, log_index, params, record
 
 from registry import checks_tinfoil, spec
 from registry.app import create_app
 from registry.model import VerificationUnavailable
 
-BUNDLE_IGNORED = "bundle ignored: publication is not verified in this version"
+BUNDLE_IGNORED = "bundle ignored: check 7 looks the receipt up on Rekor"
+LOG_INDEX_MALFORMED = "logIndex must be one non-negative integer: the receipt's entry index on Rekor"
+LOG_INDEX_REQUIRED = "logIndex is required: the receipt has a hardware report, so check 7 looks up its entry on Rekor"
 STRICT = [name for name, entry in EXPECTED.items() if "strict" in entry]
 
 
@@ -32,9 +34,11 @@ def part(data: bytes, filename: str = "record.dsse.json"):
     return io.BytesIO(data), filename, "application/json"
 
 
-def post(client, raw: bytes, **kwargs):
-    """POST `raw` as the multipart file part `record`, as `curl -F record=@file` sends it."""
-    return client.post("/api/records", data={"record": part(raw)}, **kwargs)
+def post(client, raw: bytes, log_index: int | str | None = None, **kwargs):
+    """POST `raw` as the multipart file part `record`, as `curl -F record=@file` sends it, and `log_index` as
+    the field `logIndex`, as `-F logIndex=...` does."""
+    data = {"record": part(raw)} if log_index is None else {"record": part(raw), "logIndex": str(log_index)}
+    return client.post("/api/records", data=data, **kwargs)
 
 
 def stored_files(mode: str) -> list[Path]:
@@ -44,7 +48,7 @@ def stored_files(mode: str) -> list[Path]:
 
 @pytest.mark.parametrize("name", params(EXPECTED))
 def test_every_fixture_gets_its_expected_dev_status(dev, name):
-    response = post(dev, record(name))
+    response = post(dev, record(name), log_index(name))
     expected = EXPECTED[name]
     assert response.status_code == expected["dev"]["status"], response.get_json()
     body = response.get_json()
@@ -57,13 +61,15 @@ def test_every_fixture_gets_its_expected_dev_status(dev, name):
 
 @pytest.mark.parametrize("name", params(STRICT))
 def test_strict_fixtures_get_their_expected_strict_status(strict, name):
-    assert post(strict, record(name)).status_code == EXPECTED[name]["strict"]["status"]
+    assert post(strict, record(name), log_index(name)).status_code == EXPECTED[name]["strict"]["status"]
 
 
 def test_refusals_are_json_with_error_and_detail(dev):
-    body = post(dev, record("C14_unlisted_bo")).get_json()
-    assert body["error"] == "Forbidden"
-    assert "not on this registry's list" in body["detail"]
+    body = post(dev, record("C6_unlisted_approver")).get_json()
+    assert body["error"] == "Unprocessable Entity"
+    assert body["detail"] == "failed: consent"
+    consent, = (c for c in body["checks"] if c["id"] == "consent")
+    assert consent["detail"] == "no approval from an email on this registry's list"
 
 
 def test_a_scripted_post_with_a_bundle_part_ignores_it_with_a_warning(dev):
@@ -80,13 +86,38 @@ def test_a_scripted_post_with_a_bundle_part_ignores_it_with_a_warning(dev):
 
 
 def test_the_bundle_warning_comes_with_refusals_too(dev):
-    response = dev.post("/api/records", data={"record": part(record("C14_unlisted_bo")), "bundle": "{}"})
-    assert response.status_code == 403
+    response = dev.post("/api/records", data={"record": part(record("C6_unlisted_approver")), "bundle": "{}"})
+    assert response.status_code == 422
     assert response.get_json()["warnings"] == [BUNDLE_IGNORED]
 
 
 def test_no_warnings_without_a_bundle(dev):
     assert "warnings" not in post(dev, record("sim_A")).get_json()
+
+
+@pytest.mark.parametrize("value", ["-1", "abc", "1.5", "", " 1", "0x10", "1" * 19])
+def test_a_malformed_log_index_is_refused_with_400_and_not_stored(dev, value):
+    response = post(dev, record("sim_A"), value)
+    assert (response.status_code, response.get_json()["detail"]) == (400, LOG_INDEX_MALFORMED)
+    assert stored_files("dev") == []
+
+
+def test_a_log_index_given_twice_is_refused_with_400(dev):
+    response = dev.post("/api/records", data={"record": part(record("sim_A")), "logIndex": ["1", "2"]})
+    assert (response.status_code, response.get_json()["detail"]) == (400, LOG_INDEX_MALFORMED)
+
+
+def test_a_receipt_with_a_hardware_report_and_no_log_index_is_refused_with_400(dev):
+    # Offline: the refusal comes before any check.
+    response = post(dev, record("om_receipt"))
+    assert response.status_code == 400
+    assert (response.get_json()["error"], response.get_json()["detail"]) == ("Bad Request", LOG_INDEX_REQUIRED)
+    assert stored_files("dev") == []
+
+
+def test_a_test_data_receipt_ignores_a_log_index(dev):
+    response = post(dev, record("sim_A"), OPENMINED_LOG_INDEX)
+    assert (response.status_code, response.get_json()["publication"]) == (201, None)
 
 
 @pytest.mark.parametrize("origin", ["http://localhost:5173", "https://evil.example", "null", ""])
@@ -149,7 +180,8 @@ def test_a_network_failure_is_a_503_and_stores_nothing(dev, monkeypatch):
 
 # --- reads -------------------------------------------------------------------
 
-DEV_ACCEPTED = [name for name, entry in EXPECTED.items() if entry["dev"]["status"] == 201]
+# Every fixture dev mode accepts that verifies offline (om_receipt's checks 3 and 4 need the network).
+DEV_ACCEPTED = [name for name, entry in EXPECTED.items() if entry["dev"]["status"] == 201 and not entry.get("network")]
 ROUTES_WITH_AN_ID = ["/api/records/{}", "/api/records/{}/record.dsse.json", "/api/systems/{}", "/api/components/{}",
                      "/api/models/{}", "/api/evals/{}", "/api/lookup/{}"]
 
@@ -191,12 +223,11 @@ def test_a_limit_out_of_range_is_a_400(dev, limit):
 
 def test_the_read_endpoints_answer_from_the_index(seeded):
     d1 = seeded.get(f"/api/records/{EXPECTED['D1']['recordId']}").get_json()
-    weights, runtime = d1["components"][0], d1["components"][1]
-    runtime_hex = runtime["digest"].removeprefix("sha256:")  # an OCI digest
+    weights, sampling = d1["components"]  # the base model, then the sampling config
     assert seeded.get(f"/api/systems/{d1['systemDigest']}").get_json()["digest"] == d1["systemDigest"]
     assert seeded.get(f"/api/evals/{d1['eval']['digest']}").get_json()["names"] == [d1["eval"]["name"]]
     assert seeded.get(f"/api/models/{weights['digest']}").get_json()["names"] == [weights["name"]]
-    assert seeded.get(f"/api/components/{runtime_hex}").get_json()["names"] == [runtime["name"]]
+    assert seeded.get(f"/api/components/{sampling['digest']}").get_json()["names"] == [sampling["name"]]
     assert len(seeded.get("/api/models").get_json()["models"]) == 4
     assert len(seeded.get("/api/evals").get_json()["evals"]) == 4
     assert seeded.get(f"/api/lookup/{d1['systemDigest']}").get_json() == {"kind": "system", "id": d1["systemDigest"]}
@@ -218,8 +249,8 @@ def test_an_unknown_id_is_a_404(seeded, route):
     assert response.get_json()["detail"] == "nothing on file for that"
 
 
-def test_no_answer_shows_a_quote_sentinel(seeded):
-    # Their quotes are sentinels, and nothing from execution.attestation is ever shown.
+def test_no_answer_shows_a_report_sentinel(seeded):
+    # Their hardware reports are sentinels, and nothing from execution.attestation is ever shown.
     d1 = seeded.get(f"/api/records/{EXPECTED['D1']['recordId']}").get_json()
     pages = ["/api/records", "/api/models", "/api/evals", f"/api/systems/{d1['systemDigest']}",
              f"/api/evals/{d1['eval']['digest']}", f"/api/models/{d1['components'][0]['digest']}"]

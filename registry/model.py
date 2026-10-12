@@ -11,12 +11,11 @@ log = logging.getLogger(__name__)
 class Status(StrEnum):
     PASS = "PASS"
     FAIL = "FAIL"
-    PENDING = "PENDING"  # required input absent: the quote is a sentinel
-    NA = "N/A"  # check 6 always (publication deferred); check 7 when consent is absent
+    PENDING = "PENDING"  # required input absent: the hardware report is a sentinel
 
 
 # The seven checks, in order.
-CHECK_IDS = ("signature", "key_binding", "hardware", "measurement", "digests", "publication", "consent")
+CHECK_IDS = ("signature", "key_binding", "hardware", "measurement", "digests", "consent", "publication")
 
 
 @dataclass(frozen=True)
@@ -61,9 +60,20 @@ class Enclave:
 
 
 @dataclass(frozen=True)
+class Publication:
+    """Where Rekor logs the receipt, as Rekor answered when check 7 PASSed."""
+
+    uuid: str
+    log_index: int
+    integrated_time: int  # Rekor's clock, in Unix seconds
+    url: str  # the entry on search.sigstore.dev
+
+
+@dataclass(frozen=True)
 class VerificationResult:
     checks: tuple[Check, ...]  # all seven, in order
     enclave: Enclave | None  # None unless checks 3 and 4 PASS
+    publication: Publication | None  # None unless check 7 PASSes
 
 
 @dataclass(frozen=True)
@@ -79,7 +89,9 @@ class Accepted:
     state: str  # "verified" or "incomplete"
     checks: tuple[Check, ...]
     enclave: Enclave | None
-    benchmark_owner_display: str  # the name this registry's policy gives the benchmark owner's key
+    publication: Publication | None
+    benchmark_owner_email: str  # the first approver on this registry's list
+    benchmark_owner_display: str  # the name the list gives that email
 
 
 @dataclass(frozen=True)
