@@ -9,7 +9,7 @@ import runpy
 
 import pytest
 import rfc8785
-from fixture_data import CHECKED, DEV_POLICY, EXPECTED, ROOT, record
+from fixture_data import CHECKED, DEV_POLICY, EXPECTED, OPENMINED_LOG_INDEX, ROOT, log_index, record
 
 from registry import spec
 from registry.config import load_config
@@ -51,6 +51,13 @@ def test_regenerating_reproduces_the_committed_fixtures():
 @pytest.mark.parametrize("name", EXPECTED)
 def test_record_id_is_sha256_of_the_file(name):
     assert hashlib.sha256(record(name)).hexdigest() == EXPECTED[name]["recordId"]
+
+
+@pytest.mark.parametrize("name", CHECKED)
+def test_a_fixture_with_a_hardware_report_carries_openmined_s_log_index_and_one_without_carries_none(name):
+    report = statement(name)["predicate"]["execution"]["attestation"]["keyBinding"]["cpu_evidence"]["report_base64"]
+    has_report = not report.startswith(spec.SENTINEL_PREFIXES)
+    assert log_index(name) == (OPENMINED_LOG_INDEX if has_report else None)
 
 
 def test_every_rejected_fixture_has_a_reason():

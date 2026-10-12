@@ -11,7 +11,7 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 
-from registry import checks_publication, checks_software, checks_tinfoil, policy, syft_receipt
+from registry import checks_publication, checks_software, checks_tinfoil, policy, spec, syft_receipt
 from registry.config import Config, Policy
 from registry.envelope import Receipt, Unrecognized, parse_receipt
 from registry.index import Index, IndexedRecord
@@ -23,14 +23,17 @@ from registry.syft_receipt import SchemaError, Statement, parse_statement
 log = logging.getLogger(__name__)
 
 TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%SZ"  # receivedAt: RFC 3339, UTC, second precision
+LOG_INDEX_REQUIRED = "logIndex is required: the receipt has a hardware report, so check 7 looks up its entry on Rekor"
 
 
-def verify(receipt: Receipt, statement: Statement, trust: Policy, refcache: RefCache) -> VerificationResult:
-    """Checks 1-7, in order. Raises VerificationUnavailable on a network error."""
+def verify(receipt: Receipt, statement: Statement, trust: Policy, refcache: RefCache,
+           log_index: int | None) -> VerificationResult:
+    """Checks 1-7, in order; check 7 looks up the entry at `log_index`. Raises VerificationUnavailable on a
+    network error."""
     predicate = statement.predicate
     attestation = predicate.execution.attestation
     hardware, enclave = checks_tinfoil.check_attestation(attestation, trust.trusted_code, refcache)
-    publication, published = checks_publication.check_publication(receipt, attestation.keyBinding)
+    publication, published = checks_publication.check_publication(receipt, attestation.keyBinding, log_index)
     checks = (
         checks_software.check_signature(receipt.envelope, attestation.keyBinding.signing_key),
         *hardware,
@@ -41,8 +44,9 @@ def verify(receipt: Receipt, statement: Statement, trust: Policy, refcache: RefC
     return VerificationResult(checks, enclave, published)
 
 
-def assess(raw: bytes, config: Config, refcache: RefCache, received_at: str) -> IngestResult | IndexedRecord:
-    """The record to index, or the refusal. Stores nothing.
+def assess(raw: bytes, config: Config, refcache: RefCache, received_at: str,
+           log_index: int | None) -> IngestResult | IndexedRecord:
+    """The record to index, or the refusal. Stores nothing. `log_index` is the receipt's entry on Rekor.
 
     Raises VerificationUnavailable on a network error: then there is no verdict at all.
     """
@@ -56,8 +60,12 @@ def assess(raw: bytes, config: Config, refcache: RefCache, received_at: str) -> 
     except SchemaError as e:
         return IngestResult(422, {"recordId": record_id, "detail": "the statement violates the schema",
                                   "schemaErrors": e.errors})
+    report = statement.predicate.execution.attestation.keyBinding.cpu_evidence.report_base64
+    if log_index is None and not report.startswith(spec.SENTINEL_PREFIXES):  # a sentinel: check 7 is PENDING
+        log.debug("REJECT record %s: a hardware report, but no Rekor log index", record_id)
+        return IngestResult(400, {"recordId": record_id, "detail": LOG_INDEX_REQUIRED})
 
-    result = verify(receipt, statement, config.policy, refcache)
+    result = verify(receipt, statement, config.policy, refcache, log_index)
     checks = result.checks
     for c in checks:
         log.debug("record %s: %s %s (%s)", record_id, c.id, c.status, c.detail)
@@ -73,20 +81,27 @@ def assess(raw: bytes, config: Config, refcache: RefCache, received_at: str) -> 
     return syft_receipt.to_index(statement, accepted)
 
 
-def ingest(raw: bytes, config: Config, store: Store, index: Index, refcache: RefCache) -> IngestResult:
-    """POST /api/records: assess the receipt, then store and index it if it is accepted."""
+def ingest(raw: bytes, config: Config, store: Store, index: Index, refcache: RefCache,
+           log_index: int | None = None) -> IngestResult:
+    """POST /api/records: assess the receipt, then store and index it if it is accepted.
+
+    `log_index` is the receipt's entry on Rekor, as the submitter gave it.
+    """
     record_id = hashlib.sha256(raw).hexdigest()
-    # A record stored before keeps its first receipt time, even if a rebuild has since left it out of the index.
+    # A record stored before keeps its first receipt time and Rekor log index, even if a rebuild has since
+    # left it out of the index.
     meta = store.read_meta(record_id)
     received_at = meta["receivedAt"] if meta else datetime.now(UTC).strftime(TIMESTAMP_FORMAT)
+    if meta and "logIndex" in meta:
+        log_index = meta["logIndex"]
     try:
-        assessed = assess(raw, config, refcache, received_at)
+        assessed = assess(raw, config, refcache, received_at, log_index)
     except VerificationUnavailable as e:
         return IngestResult(503, {"recordId": record_id, "detail": f"verification unavailable, try again later: {e}"})
     if isinstance(assessed, IngestResult):
         return assessed
 
-    store.put_record(raw, received_at)
+    store.put_record(raw, received_at, log_index)
     if index.add(assessed):
         log.debug("ACCEPT record %s (%d bytes): %s, 201", record_id, len(raw), assessed.state)
         return IngestResult(201, assessed.to_json())
@@ -114,7 +129,8 @@ def rebuild(config: Config, store: Store, refcache: RefCache) -> tuple[int, list
             except Corrupt:  # not the bytes received, so never listed; one such file mustn't block the rest
                 why = "its stored bytes no longer hash to its id"
             else:
-                assessed = assess(raw, config, refcache, store.read_meta(record_id)["receivedAt"])
+                meta = store.read_meta(record_id)
+                assessed = assess(raw, config, refcache, meta["receivedAt"], meta.get("logIndex"))
                 if not isinstance(assessed, IngestResult):
                     new.add(assessed)
                     indexed += 1

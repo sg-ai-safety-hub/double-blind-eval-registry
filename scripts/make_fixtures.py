@@ -38,6 +38,9 @@ GENERATED = ROOT / "fixtures/generated"
 EXPECTED = ROOT / "fixtures/expected.json"
 OPENMINED = ROOT / "fixtures/openmined/receipt.dsse.json"  # signed by OpenMined's enclave, as received
 UNSIGNED = ROOT / "fixtures/openmined/sample-receipt.json"  # the same statement, without its envelope
+# Where OpenMined's receipt is on Rekor: the log index the fixtures with a report are POSTed with.
+REKOR_ENTRY = ROOT / "fixtures/rekor/om_receipt.entry.json"  # Rekor's answer for that entry, as captured
+OPENMINED_LOG_INDEX = next(iter(json.loads(REKOR_ENTRY.read_bytes()).values()))["logIndex"]
 DBE_SAMPLE = ROOT / "fixtures/dbe/sample-receipt.json"
 TINFOIL = ROOT / "fixtures/tinfoil"  # live captures from scripts/capture_tinfoil_reports.py
 MISSING_TAG = "v0.0.0-does-not-exist"
@@ -218,6 +221,9 @@ def build() -> tuple[dict[str, bytes], dict]:
         entry["dev"] = {"status": dev, "state": state} if dev == 201 else {"status": dev}
         if network:  # a real or random report: checks 3-4 fetch AMD's VCEK and Sigstore's root, check 7 asks Rekor
             entry["network"] = True
+            # POSTed with OpenMined's log index: for every fixture but om_receipt, that entry holds another
+            # receipt, so check 7 FAILs.
+            entry["logIndex"] = OPENMINED_LOG_INDEX
         if strict is not None:
             entry["strict"] = {"status": strict}
         expected[name] = entry

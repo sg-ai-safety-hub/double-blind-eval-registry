@@ -11,7 +11,7 @@ one byte flipped), or random bytes (C9). Never publish a fixture to production S
 | `openmined/sample-receipt.json` | The same statement, without its DSSE envelope, so unsigned (fixture U7). | Given by OpenMined. Never edit. |
 | `generated/`, `expected.json` | A signed receipt for each test case, and the verdict each one should get. | `uv run python scripts/make_fixtures.py` (deterministic). Never hand-edit. |
 | `dbe/sample-receipt.json` | A sample of DBE's own receipt format, dbe-receipt-v1, which the registry does not accept (fixture U6). | Captured once; see below. Never regenerate. |
-| `rekor/` | Rekor's answers for OpenMined's receipt: `om_receipt.search.json`, the search by its payload hash, and `om_receipt.entry.json`, its entry (log index 3129204433). Offline tests answer check 7 with them. | Captured once with curl; see below. Never edit. |
+| `rekor/` | Rekor's answer for OpenMined's receipt: `om_receipt.entry.json`, its entry, fetched by its log index (3129204433). Offline tests answer check 7 with it. | Captured once with curl; see below. Never edit. |
 | `tinfoil/` | Live SEV-SNP reports (`<name>.quote`: base64 of the raw report) with a sidecar (`<name>.meta.json`: repo, release tag, capture time). C11 and C12 are built from the router capture. | Captured once; see below. `scripts/capture_tinfoil_reports.py` never overwrites a capture. Never regenerate. |
 
 `registry-policy.dev.example.yaml` lists an approver email of every fixture except `C6_unlisted_approver`,
@@ -39,20 +39,19 @@ fixtures leave out its statement's bulky parts the registry never reads: file co
 
 ## `rekor/`
 
-Rekor's answers, saved byte for byte. The first is the search by the sha256 of the receipt's payload
-(`06337ce7…`); the second is the one entry it found, which OpenMined's benchmark owner logged:
+Rekor's answer, saved byte for byte, for the entry OpenMined's benchmark owner logged, fetched as check 7
+fetches it: by its log index.
 
 ```bash
-curl -X POST https://rekor.sigstore.dev/api/v1/index/retrieve -H 'Content-Type: application/json' \
-  -d '{"hash":"sha256:06337ce74612a8afa9774f0435cdef2f2227958107c259e8ab4d751ea5a5e051"}' -o om_receipt.search.json
-curl https://rekor.sigstore.dev/api/v1/log/entries/108e9186e8c5677a90985c71d8a25a4de23d6f7e17e8d0cb40089161de9a6ed3cc14072c0d1a5a6f \
-  -o om_receipt.entry.json
+curl 'https://rekor.sigstore.dev/api/v1/log/entries?logIndex=3129204433' -o om_receipt.entry.json
 ```
 
 | File | sha256 | Bytes |
 |---|---|---|
-| `om_receipt.search.json` | `3efaa1b1a55208a0ccc71cff3e6d2e6f645293d9b5b29e55b8bbd53fca3a1e55` | 85 |
-| `om_receipt.entry.json` | `a29b58f766b2c5d95c1091e70eaabd6b6b4a386cdb189e4e5296c7e06b65e254` | 3510 |
+| `om_receipt.entry.json` | `5ee741943e59cb0f2e79f6ebd63c861d6f7661e7f448c5c4cf541c2d95e6db88` | 3577 |
+
+`expected.json` gives every fixture with a hardware report this `logIndex`, and the tests POST them with it.
+Only `om_receipt` is in that entry, so check 7 FAILs the others.
 
 The entry is Rekor v1 `dsse` entry 3129204433. Its payload hash and signature
 are the receipt's; its envelope hash isn't sha256 of `receipt.dsse.json`, because the envelope was

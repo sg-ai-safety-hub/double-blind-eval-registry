@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
-from fixture_data import CHECKED, DEV_POLICY, EXPECTED, STRICT_POLICY, params, record
+from fixture_data import CHECKED, DEV_POLICY, EXPECTED, OPENMINED_LOG_INDEX, STRICT_POLICY, log_index, params, record, rekor
 
 from registry import checks_publication, checks_tinfoil, spec
 from registry.config import load_config
@@ -25,6 +25,9 @@ from registry.syft_receipt import parse_statement
 DEV_ACCEPTED = [name for name, entry in EXPECTED.items() if entry["dev"]["status"] == 201 and not entry.get("network")]
 EARLIER = "2026-09-01T00:00:00Z"
 OPENMINED_OWNER = {"email": "benchmark_owner@openmined.org", "display": "OpenMined sample benchmark owner"}
+LOG_INDEX_REQUIRED = "logIndex is required: the receipt has a hardware report, so check 7 looks up its entry on Rekor"
+ENCLAVE = Enclave(measurement="33" * 48, repo="OpenMined/syft-enclave-tinfoil", release_tag="v0.1.28",
+                  release_digest="74" * 32)
 
 
 @pytest.fixture
@@ -54,7 +57,7 @@ def statuses(body: dict) -> dict:
 @pytest.mark.parametrize("name", params(CHECKED))
 def test_checks_run_in_order_and_match_expected(name, refcache):
     receipt = parse_receipt(record(name))
-    result = verify(receipt, parse_statement(receipt.statement), config("dev").policy, refcache)
+    result = verify(receipt, parse_statement(receipt.statement), config("dev").policy, refcache, log_index(name))
     assert tuple(c.id for c in result.checks) == CHECK_IDS
     assert {c.id: c.status for c in result.checks} == EXPECTED[name]["checks"]
 
@@ -154,7 +157,7 @@ def hardware(status: Status, enclave: Enclave | None = None):
 
 def published(publication: Publication):
     """A stand-in for check 7 that PASSes with these facts."""
-    def check_publication(receipt, key_binding):
+    def check_publication(receipt, key_binding, log_index):
         return Check("publication", Status.PASS, "stand-in"), publication
     return check_publication
 
@@ -173,8 +176,7 @@ def test_a_network_failure_during_the_checks_is_a_503_and_stores_nothing(store, 
 
 
 def test_a_verified_answer_carries_the_verified_enclave_and_publication_facts(store, index, refcache, monkeypatch):
-    enclave = Enclave(measurement="33" * 48, repo="OpenMined/syft-enclave-tinfoil", release_tag="v0.1.28",
-                      release_digest="74" * 32)
+    enclave = ENCLAVE
     publication = Publication(uuid="10" * 40, log_index=3129204433, integrated_time=1791368875,
                               url=spec.REKOR_SEARCH_LINK.format(3129204433))
     monkeypatch.setattr(checks_tinfoil, "check_attestation", hardware(Status.PASS, enclave))
@@ -202,6 +204,56 @@ def test_a_network_failure_during_check_7_is_a_503_and_stores_nothing(store, ind
     assert (result.status, result.body["detail"]) == (
         503, "verification unavailable, try again later: check 7 could not reach the network: connection refused")
     assert not store.root.exists()
+
+
+# --- the Rekor log index -------------------------------------------------------
+
+def test_a_receipt_with_a_hardware_report_and_no_log_index_is_refused_with_400_before_any_check(
+        store, index, refcache, monkeypatch):
+    def no_check(*args):
+        raise AssertionError("no check may run")
+    monkeypatch.setattr(checks_tinfoil, "check_attestation", no_check)
+    monkeypatch.setattr(checks_publication, "check_publication", no_check)
+    result = ingest(record("om_receipt"), config("dev"), store, index, refcache)
+    assert (result.status, result.body) == (400, {"recordId": EXPECTED["om_receipt"]["recordId"],
+                                                  "detail": LOG_INDEX_REQUIRED})
+    assert not store.root.exists()
+
+
+def openmined_verified(monkeypatch):
+    """A dev registry in ./data where OpenMined's receipt verifies offline: checks 2-4 stand in as PASS, and
+    check 7 asks the captured Rekor. Returns its config, store, index and refcache."""
+    monkeypatch.setattr(checks_tinfoil, "check_attestation", hardware(Status.PASS, ENCLAVE))
+    cfg = dev_config()
+    return cfg, Store(cfg.store_dir), Index.open(cfg.index_path, cfg.policy_sha256, cfg.mode), RefCache(cfg.refcache_dir)
+
+
+def test_the_log_index_is_stored_with_the_record_and_a_rebuild_looks_up_the_same_entry(monkeypatch):
+    cfg, store, index, refcache = openmined_verified(monkeypatch)
+    record_id = EXPECTED["om_receipt"]["recordId"]
+    with rekor() as fetched:
+        result = ingest(record("om_receipt"), cfg, store, index, refcache, log_index=OPENMINED_LOG_INDEX)
+        assert (result.status, result.body["publication"]["logIndex"]) == (201, OPENMINED_LOG_INDEX)
+        assert store.read_meta(record_id)["logIndex"] == OPENMINED_LOG_INDEX
+        cfg.index_path.unlink()
+        assert rebuild(cfg, store, refcache) == (1, [])
+    assert [call.args for call in fetched.call_args_list] == [(OPENMINED_LOG_INDEX,)] * 2
+    assert Index.open(cfg.index_path, cfg.policy_sha256, cfg.mode).get(record_id).publication.log_index == \
+        OPENMINED_LOG_INDEX
+
+
+def test_a_record_stored_before_keeps_its_first_log_index(monkeypatch):
+    cfg, store, index, refcache = openmined_verified(monkeypatch)
+    with rekor():  # any index but OpenMined's is a 404, so check 7 would FAIL with the new one
+        assert ingest(record("om_receipt"), cfg, store, index, refcache, log_index=OPENMINED_LOG_INDEX).status == 201
+        again = ingest(record("om_receipt"), cfg, store, index, refcache, log_index=OPENMINED_LOG_INDEX + 1)
+    assert again.status == 200
+    assert store.read_meta(EXPECTED["om_receipt"]["recordId"])["logIndex"] == OPENMINED_LOG_INDEX
+
+
+def test_a_test_data_receipt_needs_no_log_index_and_stores_none(store, index, refcache):
+    assert ingest(record("sim_A"), config("dev"), store, index, refcache).status == 201
+    assert set(store.read_meta(EXPECTED["sim_A"]["recordId"])) == {"receivedAt"}
 
 
 # --- rebuild -----------------------------------------------------------------

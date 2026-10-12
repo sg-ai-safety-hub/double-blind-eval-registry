@@ -14,7 +14,7 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
-from fixture_data import EXPECTED, ROOT, record, rekor
+from fixture_data import EXPECTED, OPENMINED_LOG_INDEX, ROOT, record, rekor
 from tinfoil.attestation import Document, Measurement, PredicateType, Verification
 from tinfoil.attestation.abi_sev import Report
 
@@ -31,7 +31,6 @@ EMAIL = "benchmark_owner@openmined.org"
 DISPLAY = "Verified-path owner"
 # tinfoil.hash of OpenMined/syft-enclave-tinfoil v0.1.28, the release the receipt's report measures.
 RELEASE_DIGEST = "747df14f65121b5d8042bd6be493a269bfbf5471e8b5d704a811aa1e29953be2"
-LOG_INDEX = 3129204433  # where Rekor logged the receipt
 ALL_PASS = {check_id: "PASS" for check_id in CHECK_IDS}
 
 
@@ -53,7 +52,9 @@ def verified_hardware():
 
 
 def post(client, raw: bytes):
-    return client.post("/api/records", data={"record": (io.BytesIO(raw), "record.dsse.json")})
+    """POST `raw` with OpenMined's log index, which every receipt here has a report for."""
+    return client.post("/api/records", data={"record": (io.BytesIO(raw), "record.dsse.json"),
+                                             "logIndex": str(OPENMINED_LOG_INDEX)})
 
 
 def statuses(body: dict) -> dict:
@@ -86,7 +87,8 @@ def test_openmined_s_receipt_is_listed_as_verified_in_strict_mode(strict):
     assert (enclave["type"], enclave["repo"], enclave["releaseTag"], enclave["releaseDigest"]) == (
         "AMD SEV-SNP", "OpenMined/syft-enclave-tinfoil", "v0.1.28", RELEASE_DIGEST)
     publication = body["publication"]
-    assert (publication["logIndex"], publication["url"]) == (LOG_INDEX, spec.REKOR_SEARCH_LINK.format(LOG_INDEX))
+    assert (publication["logIndex"], publication["url"]) == (
+        OPENMINED_LOG_INDEX, spec.REKOR_SEARCH_LINK.format(OPENMINED_LOG_INDEX))
 
 
 def test_its_system_eval_and_model_roll_up_as_verified(strict):
@@ -107,7 +109,8 @@ def test_the_same_receipt_is_refused_when_no_approver_is_listed(monkeypatch):
 
 
 def test_its_real_report_stapled_onto_another_key_fails_checks_2_and_7(strict):
-    # stapled_B carries the same report, but its crypto_material names fixture key B, and Rekor has no entry for it.
+    # stapled_B carries the same report, but its crypto_material names fixture key B. Posted with OpenMined's
+    # log index, whose entry holds OpenMined's signature and key, not B's.
     with verified_hardware():
         response = post(strict, record("stapled_B"))
     assert response.status_code == 422

@@ -17,6 +17,7 @@
       "state": "verified"
     },
     "network": true,
+    "logIndex": 3129204433,
     "strict": {
       "status": 422
     }
@@ -161,6 +162,7 @@
       "status": 422
     },
     "network": true,
+    "logIndex": 3129204433,
     "strict": {
       "status": 422
     }
@@ -181,7 +183,8 @@
     "dev": {
       "status": 422
     },
-    "network": true
+    "network": true,
+    "logIndex": 3129204433
   },
   "C9_garbage_report": {
     "record": "fixtures/generated/C9_garbage_report.dsse.json",
@@ -199,7 +202,8 @@
     "dev": {
       "status": 422
     },
-    "network": true
+    "network": true,
+    "logIndex": 3129204433
   },
   "C11_untrusted_repo": {
     "record": "fixtures/generated/C11_untrusted_repo.dsse.json",
@@ -217,7 +221,8 @@
     "dev": {
       "status": 422
     },
-    "network": true
+    "network": true,
+    "logIndex": 3129204433
   },
   "C12_repo_mismatch": {
     "record": "fixtures/generated/C12_repo_mismatch.dsse.json",
@@ -235,7 +240,8 @@
     "dev": {
       "status": 422
     },
-    "network": true
+    "network": true,
+    "logIndex": 3129204433
   },
   "C13_tag_missing": {
     "record": "fixtures/generated/C13_tag_missing.dsse.json",
@@ -253,7 +259,8 @@
     "dev": {
       "status": 422
     },
-    "network": true
+    "network": true,
+    "logIndex": 3129204433
   },
   "U1_predicate_type": {
     "record": "fixtures/generated/U1_predicate_type.dsse.json",

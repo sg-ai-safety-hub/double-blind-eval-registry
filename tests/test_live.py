@@ -7,7 +7,7 @@ import json
 
 import pytest
 import requests
-from fixture_data import record
+from fixture_data import log_index, record
 from tinfoil.attestation.abi_sev import Report
 from tinfoil.github import GITHUB_PROXY
 
@@ -35,7 +35,7 @@ def refcache(tmp_path):
 
 def run(name: str, refcache: RefCache):
     receipt = parse_receipt(record(name))
-    return verify(receipt, parse_statement(receipt.statement), POLICY, refcache)
+    return verify(receipt, parse_statement(receipt.statement), POLICY, refcache, log_index(name))
 
 
 def statuses(result) -> dict:
@@ -60,7 +60,7 @@ def test_openmined_s_receipt_is_found_on_the_real_rekor(refcache):
         log_index=3129204433, integrated_time=1791368875, url=spec.REKOR_SEARCH_LINK.format(3129204433))
 
 
-def test_a_receipt_with_a_real_report_that_nobody_logged_fails_check_7(refcache):
+def test_a_receipt_posted_with_another_receipt_s_log_index_fails_check_7(refcache):
     result = run("stapled_B", refcache)
     assert (statuses(result)["publication"], result.publication) == (Status.FAIL, None)
 

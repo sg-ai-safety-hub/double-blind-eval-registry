@@ -2,9 +2,10 @@
 
 OpenMined's benchmark owner logs each receipt right after the run, as a Rekor v1 dsse entry whose verifier
 is the enclave signing key (PySyft syft_enclaves/receipt/rekor.py). Rekor keeps the payload's hash, the
-envelope's hash, the signature and the key, but not the receipt. This check searches Rekor by the payload's
-hash, and PASSes when an entry holds this receipt's signature and signing key. The envelope hash isn't
-compared: OpenMined logs the envelope re-serialised, so it isn't the record id.
+envelope's hash, the signature and the key, but not the receipt. The submitter gives the entry's log index
+with the receipt; this check fetches that entry, and PASSes when it holds this receipt's payload hash,
+signature and signing key. The envelope hash isn't compared: OpenMined logs the envelope re-serialised, so
+it isn't the record id. Rekor's search API isn't used: it is best-effort, and Rekor v2 drops it.
 
 It trusts Rekor's answer over HTTPS. The entry's signed timestamp and inclusion proof are not verified:
 sigstore-python verifies them only inside certificate-signed bundles, and the rest of its code for them is
@@ -33,8 +34,8 @@ log = logging.getLogger(__name__)
 
 CHECK_ID = "publication"
 TIMEOUT_SECONDS = 15  # as refcache's fetch
-# An entry's UUID: its leaf hash, after the tree id of its log shard when Rekor gives one. Checked before it
-# goes into a URL.
+NOT_FOUND = 404  # Rekor has no entry at that index: a FAIL, not a network error
+# An entry's UUID: its leaf hash, after the tree id of its log shard when Rekor gives one.
 UUID = r"^(?:[0-9a-f]{16})?[0-9a-f]{64}$"
 
 
@@ -69,71 +70,61 @@ class DsseBody(_Model):
     dsse: DsseSpec = Field(alias="spec")
 
 
-SEARCH_ANSWER = TypeAdapter(list[Annotated[str, Field(strict=True, pattern=UUID)]])
-ENTRY_ANSWER = TypeAdapter(dict[str, LogEntry])
+ENTRY_ANSWER = TypeAdapter(dict[Annotated[str, Field(pattern=UUID)], LogEntry])
 
 
-def search_rekor(payload_sha256: str) -> bytes:
-    """Ask Rekor's search index for the entries recording this payload hash. The answer, as received."""
-    response = requests.post(f"{spec.REKOR_URL}/api/v1/index/retrieve", json={"hash": f"sha256:{payload_sha256}"},
-                             timeout=TIMEOUT_SECONDS)
-    response.raise_for_status()  # any failure is a network error: 503
+def fetch_rekor_entry(log_index: int) -> bytes | None:
+    """Fetch the entry at `log_index` from Rekor: the answer as received, or None if Rekor has none there."""
+    response = requests.get(f"{spec.REKOR_URL}/api/v1/log/entries", params={"logIndex": log_index},
+                            timeout=TIMEOUT_SECONDS)
+    if response.status_code == NOT_FOUND:
+        return None
+    response.raise_for_status()  # any other failure is a network error: 503
     return response.content
 
 
-def fetch_rekor_entry(uuid: str) -> bytes:
-    """Fetch one entry from Rekor. The answer, as received."""
-    response = requests.get(f"{spec.REKOR_URL}/api/v1/log/entries/{uuid}", timeout=TIMEOUT_SECONDS)
-    response.raise_for_status()
-    return response.content
-
-
-def check_publication(receipt: Receipt, key_binding: KeyBinding) -> tuple[Check, Publication | None]:
-    """Check 7, and where Rekor logs the receipt when it PASSes: the earliest entry that holds it."""
+def check_publication(receipt: Receipt, key_binding: KeyBinding, log_index: int | None) -> tuple[Check, Publication | None]:
+    """Check 7, on the entry at the submitted `log_index`, and where Rekor logs the receipt when it PASSes."""
     if key_binding.cpu_evidence.report_base64.startswith(spec.SENTINEL_PREFIXES):
         # Test data: never logged on the public Rekor, so never looked up there.
         return Check(CHECK_ID, Status.PENDING, "no hardware report in this receipt, so it is not looked up on Rekor"), None
-    payload_sha256 = hashlib.sha256(receipt.payload).hexdigest()
+    if log_index is None:  # ingest refuses this with a 400 before any check runs
+        return Check(CHECK_ID, Status.FAIL, "no Rekor log index was given"), None
     try:
-        signature = base64.b64decode(receipt.envelope["signatures"][0]["sig"], validate=True)
-        key = bytes.fromhex(key_binding.signing_key)  # SPKI DER: the key check 1 verifies under
-        uuids = SEARCH_ANSWER.validate_python(_json(search_rekor(payload_sha256)))
-        log.debug("check 7: Rekor has %d entr(ies) for payload %s", len(uuids), payload_sha256)
-        found = [publication for uuid in uuids
-                 if (publication := _holding(fetch_rekor_entry(uuid), uuid, payload_sha256, signature, key))]
+        answer = fetch_rekor_entry(log_index)
+        if answer is None:
+            return Check(CHECK_ID, Status.FAIL, f"Rekor has no entry at index {log_index}"), None
+        publication = _holding(answer, log_index, receipt, key_binding)
     except Exception as e:
         raise_if_network(e, "check 7")
-        return Check(CHECK_ID, Status.FAIL, f"Rekor's answer could not be read: {e}"), None
-
-    if not uuids:
-        return Check(CHECK_ID, Status.FAIL, "Rekor has no entry for this receipt's payload"), None
-    if not found:
-        return Check(CHECK_ID, Status.FAIL, f"none of Rekor's {len(uuids)} entries for this payload holds this "
-                                            "receipt's signature and signing key"), None
-    earliest = min(found, key=lambda publication: publication.integrated_time)
-    return Check(CHECK_ID, Status.PASS, f"logged on Rekor at index {earliest.log_index}"), earliest
+        return Check(CHECK_ID, Status.FAIL, f"Rekor's entry at index {log_index} could not be read: {e}"), None
+    if publication is None:
+        return Check(CHECK_ID, Status.FAIL, f"Rekor's entry at index {log_index} does not hold this receipt's "
+                                            "signature and signing key"), None
+    return Check(CHECK_ID, Status.PASS, f"logged on Rekor at index {log_index}"), publication
 
 
-def _holding(answer: bytes, uuid: str, payload_sha256: str, signature: bytes, key: bytes) -> Publication | None:
-    """Where Rekor logs the receipt, if its `answer` for `uuid` is a dsse entry holding this receipt's payload
-    hash, its one signature and its signing key. None otherwise, including for an answer that doesn't parse."""
-    try:
-        entries = ENTRY_ANSWER.validate_python(_json(answer))
-        if list(entries) != [uuid]:
-            log.debug("check 7: Rekor's answer for %s is keyed by %s", uuid, list(entries))
-            return None
-        entry = entries[uuid]
-        body = DsseBody.model_validate(_json(base64.b64decode(entry.body, validate=True)))
-        logged, = body.dsse.signatures
-        verifier = serialization.load_pem_public_key(base64.b64decode(logged.verifier, validate=True))
-        holds = (body.dsse.payloadHash.value == payload_sha256
-                 and base64.b64decode(logged.signature, validate=True) == signature
-                 and verifier.public_bytes(serialization.Encoding.DER,
-                                           serialization.PublicFormat.SubjectPublicKeyInfo) == key)
-    except ValueError as e:  # not a dsse entry this check can read; another entry may still hold the receipt
-        log.debug("check 7: skipped Rekor entry %s: %s", uuid, e)
-        return None
-    log.debug("check 7: Rekor entry %s (index %d) %s this receipt", uuid, entry.logIndex,
+def _holding(answer: bytes, log_index: int, receipt: Receipt, key_binding: KeyBinding) -> Publication | None:
+    """Where Rekor logs the receipt, if its `answer` is the dsse entry at `log_index` and holds this receipt's
+    payload hash, its one signature and its signing key; None if the entry holds something else.
+
+    Raises ValueError for an answer that isn't one readable dsse entry at that index.
+    """
+    entries = ENTRY_ANSWER.validate_python(_json(answer))
+    if len(entries) != 1:
+        raise ValueError(f"expected one entry, got {len(entries)}")
+    (uuid, entry), = entries.items()
+    if entry.logIndex != log_index:
+        raise ValueError(f"Rekor answered with the entry at index {entry.logIndex}")
+    body = DsseBody.model_validate(_json(base64.b64decode(entry.body, validate=True)))
+    logged, = body.dsse.signatures
+    verifier = serialization.load_pem_public_key(base64.b64decode(logged.verifier, validate=True))
+    holds = (body.dsse.payloadHash.value == hashlib.sha256(receipt.payload).hexdigest()
+             and base64.b64decode(logged.signature, validate=True)
+             == base64.b64decode(receipt.envelope["signatures"][0]["sig"], validate=True)
+             and verifier.public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
+             == bytes.fromhex(key_binding.signing_key))  # SPKI DER: the key check 1 verifies under
+    log.debug("check 7: Rekor entry %s at index %d %s this receipt", uuid, log_index,
               "holds" if holds else "does not hold")
     if not holds:
         return None

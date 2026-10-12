@@ -1,7 +1,7 @@
 """The content-addressed file store: the source of truth, holding raw bytes only.
 
     <root>/sha256/<id[0:2]>/<id[2:]>/record.dsse.json  exactly as received; id = sha256(bytes)
-                                    /meta.json         {"receivedAt": ...}
+                                    /meta.json         {"receivedAt": ..., "logIndex": ...}
 
 It never parses a record. Every write goes to a temp file in the same folder, then os.replace,
 so a concurrent reader (the dev server is multithreaded) or a crash never sees a half-written
@@ -33,8 +33,11 @@ class Store:
     def __init__(self, root: Path):
         self.root = root
 
-    def put_record(self, raw: bytes, received_at: str) -> str:
-        """Store `raw` under sha256(raw) and return that id. Storing it again changes nothing."""
+    def put_record(self, raw: bytes, received_at: str, log_index: int | None = None) -> str:
+        """Store `raw` under sha256(raw) and return that id. Storing it again changes nothing.
+
+        `log_index`, the receipt's entry on Rekor as submitted, is kept beside it when given.
+        """
         record_id = hashlib.sha256(raw).hexdigest()
         folder = self._folder(record_id)
         folder.mkdir(parents=True, exist_ok=True)
@@ -44,7 +47,10 @@ class Store:
             write_atomic(folder / RECORD, raw)
             log.debug("stored record %s (%d bytes)", record_id, len(raw))
         if not (folder / META).exists():
-            write_atomic(folder / META, _json({"receivedAt": received_at}))
+            meta = {"receivedAt": received_at}
+            if log_index is not None:
+                meta["logIndex"] = log_index
+            write_atomic(folder / META, _json(meta))
         return record_id
 
     def read_record(self, record_id: str) -> bytes | None:

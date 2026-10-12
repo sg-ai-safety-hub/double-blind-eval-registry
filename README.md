@@ -37,15 +37,16 @@ real receipt from OpenMined's enclave, and most test fixtures are built from its
 | 4 | measurement | the attested measurement is the Sigstore-signed release of a trusted repo |
 | 5 | digests | the subject digest is sha256 of `evalPipeline`'s JCS |
 | 6 | consent | an approval comes from an email on the registry's policy list |
-| 7 | publication | the receipt is logged on [Rekor](https://docs.sigstore.dev/logging/overview/), Sigstore's public transparency log: an entry found by the payload's hash holds the receipt's signature and signing key |
+| 7 | publication | the receipt is logged on [Rekor](https://docs.sigstore.dev/logging/overview/), Sigstore's public transparency log: the entry at the submitted log index holds the receipt's signature and signing key |
 
 A receipt is listed as **verified** when every check passes. A receipt with no hardware report
 (checks 2–4 and 7 pending) is accepted as **incomplete**, in dev mode only. Anything else is refused.
 OpenMined checks who owns each approver email; the registry only matches emails against its list.
 
-Check 7 looks the receipt up on Rekor v1, where OpenMined's benchmark owner logs it right after the run. It
-trusts Rekor's answer: it doesn't verify the entry's signed timestamp or inclusion proof, and it doesn't say
-who logged the receipt.
+OpenMined's benchmark owner logs each receipt on Rekor v1 right after the run, and gets back the entry's log
+index. Submit that index with the receipt, as the `logIndex` form field: it is required for any receipt with
+a hardware report. Check 7 fetches that one entry. It trusts Rekor's answer: it doesn't verify the entry's
+signed timestamp or inclusion proof, and it doesn't say who logged the receipt.
 
 
 ## Run it
@@ -59,6 +60,7 @@ uv run pytest                       # also the network tests (AMD via Tinfoil, S
 
 REGISTRY_MODE=dev uv run flask --app registry.app run --port 5050 --reload
 curl -X POST http://127.0.0.1:5050/api/records -F 'record=@fixtures/generated/sim_A.dsse.json'
+curl -X POST http://127.0.0.1:5050/api/records -F 'record=@fixtures/openmined/receipt.dsse.json' -F 'logIndex=3129204433'
 uv run python scripts/seed_dev.py   # POSTs every fixture dev mode accepts, OpenMined's real receipt included
 
 REGISTRY_MODE=dev uv run python scripts/rebuild_index.py   # after editing the policy; then restart
