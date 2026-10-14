@@ -1,0 +1,14 @@
+{
+  "$schema": "https://schema.railpack.com",
+  "packages": {
+    "node": "24"
+  },
+  "steps": {
+    "build": {
+      "commands": ["...", "cd web && corepack pnpm install --frozen-lockfile && corepack pnpm build"]
+    }
+  },
+  "deploy": {
+    "startCommand": "gunicorn --bind 0.0.0.0:${PORT:-8000} --threads 4 'registry.app:create_app()'"
+  }
+}

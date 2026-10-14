@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from registry import app as app_module
+from registry import spec
 from registry.app import create_app
 from registry.config import ConfigError, load_config
 from registry.ingest import rebuild
@@ -34,13 +36,15 @@ def registry_logger():
     logger.handlers[:] = handlers
 
 
-def test_health_reports_mode_policy_hash_and_version(client):
+def test_health_reports_mode_policy_hash_version_and_the_model_role(client):
+    # modelRole tells the UI which component is the model, so the UI hardcodes no spec constant.
     response = client.get("/api/health")
     assert response.status_code == 200
     assert response.get_json() == {
         "mode": "strict",
         "policyHash": hashlib.sha256(POLICY).hexdigest(),
         "version": importlib.metadata.version("double-blind-eval-registry"),
+        "modelRole": spec.BASE_MODEL_ROLE,
     }
 
 
@@ -68,10 +72,61 @@ def test_local_host_headers_are_accepted(client, host):
     assert client.get("/api/health", headers={"Host": host}).status_code == 200
 
 
+def test_a_deployment_adds_its_own_hostname(monkeypatch):
+    # A deployment is reached at its own hostname (e.g. its *.up.railway.app domain); every other host stays out.
+    Path("registry-policy.yaml").write_bytes(POLICY)
+    monkeypatch.setenv("REGISTRY_PUBLIC_HOST", "registry.example")
+    client = create_app().test_client()
+    assert client.get("/api/health", headers={"Host": "registry.example"}).status_code == 200
+    assert client.get("/api/health", headers={"Host": "localhost:5050"}).status_code == 200
+    assert client.get("/api/health", headers={"Host": "evil.example"}).status_code == 400
+
+
 def test_errors_are_json(client):
     response = client.get("/api/no-such-route")
     assert response.status_code == 404
     assert response.is_json
+
+
+@pytest.fixture
+def web_dist(monkeypatch, tmp_path):
+    """A built UI: web/dist's index.html and one asset."""
+    dist = tmp_path / "web-dist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text("<!doctype html><title>ui</title>")
+    (dist / "assets" / "app.js").write_text("console.log(1)")
+    monkeypatch.setattr(app_module, "WEB_DIST", dist)
+    return dist
+
+
+def test_the_ui_is_served_from_the_built_web_dist(client, web_dist):
+    response = client.get("/")
+    assert response.status_code == 200
+    assert (response.mimetype, response.data) == ("text/html", (web_dist / "index.html").read_bytes())
+
+
+def test_the_ui_page_allows_only_its_own_origin(client, web_dist):
+    # Defence in depth against XSS: no inline or third-party script, style, frame or form target.
+    policy = client.get("/").headers["Content-Security-Policy"]
+    assert "default-src 'self'" in policy and "frame-ancestors 'none'" in policy
+
+
+def test_the_ui_s_assets_are_served(client, web_dist):
+    response = client.get("/assets/app.js")
+    assert (response.status_code, response.data) == (200, b"console.log(1)")
+
+
+def test_nothing_outside_the_assets_folder_is_served(client, web_dist):
+    (web_dist / "secret.txt").write_text("x")
+    for path in ("/secret.txt", "/assets/../secret.txt", "/assets/%2e%2e/secret.txt"):
+        assert client.get(path).status_code == 404, path
+
+
+def test_an_unbuilt_ui_is_a_json_404_that_says_how_to_build_it(client, monkeypatch, tmp_path):
+    monkeypatch.setattr(app_module, "WEB_DIST", tmp_path / "missing")
+    response = client.get("/")
+    assert (response.status_code, response.is_json) == (404, True)
+    assert "pnpm build" in response.get_json()["detail"]
 
 
 def test_request_bodies_are_capped_at_1_mib(client):

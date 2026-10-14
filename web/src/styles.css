@@ -1,0 +1,279 @@
+/* Fonts are served from public/assets/fonts: nothing loads from elsewhere. Green is only for Verified; amber only for dev mode. */
+:root {
+  /* The Four Pillars demo presentation's palette (OpenMined design system): violet-grey neutrals, its green
+     for Verified, its amber for dev mode, and its indigo for links. */
+  --ink: #23202c;
+  --ink-2: #464257;
+  --muted: #5e5a72;
+  --faint: #868394;
+  --line: #cfcdd6;
+  --line-2: #ecebef;
+  --link: #5d68a6;
+  --link-hover: #3f487f;
+  --bg: #fcfcfd;
+  --surface: #fff;
+  --surface-2: #f4f3f6;
+  --head: var(--bg);
+  --head-line: var(--line-2);
+  --head-ink: var(--ink);
+  --band: #f7f6f9;
+  --band-line: var(--line-2);
+  --ok: #205a4f;
+  --ok-icon: #2d7668;
+  --ok-soft: #e3f0ed;
+  --ok-line: #2d7668;
+  --pend: #885207;
+  --pend-icon: #d17e0a;
+  --pend-soft: #fef2e2;
+  --pend-line: #d17e0a;
+  --bad: #b42318;
+  --radius: 12px;
+  --radius-s: 8px;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, sans-serif;
+  color-scheme: light;
+}
+
+/* Dark theme, following the OS setting: the presentation's own dark palette on the same variables, so no
+   rule changes. Each colour keeps its meaning: green only for Verified, amber only for dev mode. Outlines
+   (boxes, buttons, the search box) take the presentation's stronger dark line, 3:1 or more against what
+   they sit on; the hairlines between rows stay soft. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #f7f6f9;
+    --ink-2: #cfcdd6;
+    --muted: #b4b0bf;
+    --faint: #868394;
+    --line: #868394;
+    --line-2: #353243;
+    --link: #aeb6e6;
+    --link-hover: #d2d6ef;
+    --bg: #23202c;
+    --surface: #2e2b3b;
+    --surface-2: #272532;
+    --band: #29263a;
+    --ok: #76cbba;
+    --ok-icon: #76cbba;
+    --ok-soft: #1f3a35;
+    --ok-line: #76cbba;
+    --pend: #f8c073;
+    --pend-icon: #f8c073;
+    --pend-soft: #442903;
+    --pend-line: #f8c073;
+    --bad: #f97066;
+    color-scheme: dark;
+  }
+  /* The checks panel's shadow is tinted with the ink, which would glow in the dark; here it is black. */
+  :root .checks-row { box-shadow: 0 12px 28px -12px rgb(0 0 0 / 0.5); }
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 14px; line-height: 1.5;
+  -webkit-font-smoothing: antialiased; }
+a { color: var(--link); text-decoration: none; }
+a:hover { color: var(--link-hover); text-decoration: underline; }
+:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; border-radius: 3px; }
+h1 { font-size: 24px; line-height: 1.25; font-weight: 650; margin: 0; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+h2 { font-size: 16px; line-height: 1.3; font-weight: 650; margin: 0; }
+.mono { font-family: var(--mono); font-size: 12.5px; }
+.wrap { max-width: 1120px; margin: 0 auto; padding-left: 24px; padding-right: 24px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.sub { color: var(--muted); font-size: 12.5px; }
+.lede { margin: 0; max-width: 680px; color: var(--ink-2); }
+.nowrap { white-space: nowrap; }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+.icon { width: 14px; height: 14px; flex: none; }
+
+/* dev banner, header, footer */
+.dev { background: var(--pend-soft); border-bottom: 1px dashed var(--pend-line); color: var(--pend); font-size: 13px; }
+.dev-in { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding-top: 7px; padding-bottom: 7px; }
+.dev strong { font-weight: 650; letter-spacing: 0.02em; }
+.top { background: var(--head); border-bottom: 1px solid var(--head-line); }
+.top-in { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; padding-top: 12px; padding-bottom: 12px; }
+.brand { font-weight: 650; font-size: 15px; color: var(--head-ink); white-space: nowrap; }
+.brand:hover { color: var(--head-ink); text-decoration: none; }
+.search-box { flex: 1 1 320px; min-width: 0; margin: 0; }
+.search { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 10px; border: 1px solid var(--line);
+  border-radius: 999px; background: var(--surface); color: var(--muted); }
+.search:focus-within { border-color: var(--link); box-shadow: 0 0 0 3px color-mix(in srgb, var(--link) 20%, transparent); }
+.search input { flex: 1; min-width: 0; border: 0; background: none; font: inherit; font-size: 13.5px; color: var(--ink);
+  outline: none; }
+.search input::placeholder { color: var(--muted); }
+kbd { font-family: var(--mono); font-size: 11px; line-height: 1; padding: 3px 5px; border: 1px solid var(--line);
+  border-radius: 4px; background: var(--surface); color: var(--muted); }
+.nav { display: flex; gap: 4px; }
+.nav a { color: var(--ink-2); font-weight: 500; padding: 6px 10px; border-radius: 999px; }
+.nav a:hover { background: var(--surface-2); color: var(--head-ink); text-decoration: none; }
+.nav a.on { background: var(--line-2); color: var(--head-ink); }
+footer { border-top: 1px solid var(--line-2); color: var(--muted); font-size: 12.5px; }
+.foot-in { display: flex; gap: 20px; flex-wrap: wrap; padding-top: 16px; padding-bottom: 28px; }
+
+/* title band */
+.band { background: var(--band); border-bottom: 1px solid var(--band-line); }
+.band-in { display: flex; flex-direction: column; gap: 12px; padding-top: 22px; padding-bottom: 22px; }
+.crumb { display: flex; gap: 6px; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
+.crumb-item { display: inline-flex; gap: 6px; overflow-wrap: anywhere; }
+.title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.title-block { display: flex; flex-direction: column; gap: 4px; }
+.on { color: var(--ink-2); }
+.tag { font-size: 12px; line-height: 1; color: var(--ink-2); border: 1px solid var(--line); border-radius: 999px;
+  padding: 3px 8px; background: var(--surface); white-space: nowrap; }
+.meta { display: flex; flex-wrap: wrap; row-gap: 6px; color: var(--muted); font-size: 13px; align-items: center; }
+.meta > span { display: inline-flex; align-items: center; gap: 4px; padding: 0 12px; border-left: 1px solid var(--line); }
+.meta > span:first-child { padding-left: 0; border-left: 0; }
+.meta .mono { color: var(--ink); }
+
+/* states */
+.pill { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; line-height: 1;
+  padding: 4px 9px 4px 6px; border-radius: 999px; border: 1px solid; white-space: nowrap; }
+.ok { color: var(--ok); background: var(--ok-soft); border-color: var(--ok-line); }
+.pend { color: var(--pend); background: var(--pend-soft); border-color: var(--pend-line); border-style: dashed; }
+.ok-i { color: var(--ok-icon); display: inline-flex; }
+.pend-i { color: var(--pend-icon); display: inline-flex; }
+/* A passed check is a white tick in a filled green disc, as in the presentation. */
+.ok .icon circle, .ok-i .icon circle { fill: var(--ok-icon); stroke: var(--ok-icon); }
+.ok .icon path, .ok-i .icon path { stroke: var(--surface); stroke-width: 2; }
+.pend-t { color: var(--pend); font-size: 12.5px; }
+.bad-t { color: var(--bad); font-weight: 600; font-size: 12px; }
+.notice { display: flex; gap: 8px; align-items: flex-start; max-width: 760px; padding: 10px 12px; border: 1px dashed
+  var(--pend-line); background: var(--pend-soft); border-radius: var(--radius-s); color: var(--pend); font-size: 13.5px; }
+.notice .pend-i { padding-top: 3px; }
+
+/* the checks: four to a row */
+.checks-row { display: flex; gap: 8px 16px; align-items: flex-start; flex-wrap: wrap; padding-top: 12px;
+  border-top: 1px solid var(--line-2); }
+.checks-h { font-weight: 600; font-size: 13px; color: var(--ink-2); min-width: 52px; }
+/* Columns are at least as wide as their widest check, so a label never wraps and the rows stay aligned. */
+.checks { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(max-content, 1fr));
+  gap: 8px 24px; flex: 1 1 0; min-width: 0; }
+.check { display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; white-space: nowrap; }
+@media (max-width: 1100px) { .checks { grid-template-columns: repeat(2, minmax(max-content, 1fr)); } }
+@media (max-width: 560px) { .checks { grid-template-columns: minmax(0, 1fr); } .check { white-space: normal; } }
+/* Two long checks side by side (an incomplete record's "Pending: ... pending") don't fit below about 680px:
+   one to a row there too, so the page never scrolls sideways. */
+@media (max-width: 680px) { .checks { grid-template-columns: minmax(0, 1fr); } .check { white-space: normal; } }
+
+/* The one tooltip (TooltipLayer), fixed to the window so no box clips it. tip-b and tip-l are placement hints. */
+.tooltip { position: fixed; z-index: 60; width: max-content; max-width: 280px; background: var(--ink); color: var(--bg);
+  font-family: var(--sans); font-weight: 400; font-size: 12px; line-height: 1.45; padding: 7px 9px; border-radius: var(--radius-s);
+  white-space: normal; text-align: left; pointer-events: none; overflow-wrap: anywhere; }
+.info, .copy { display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 0;
+  background: none; color: var(--faint); font: inherit; }
+.info { width: 20px; height: 20px; cursor: help; border-radius: 50%; }
+.copy { width: 22px; height: 22px; cursor: pointer; border-radius: 4px; }
+.info:hover, .info:focus-visible, .copy:hover, .copy:focus-visible { color: var(--ink); background: var(--surface-2); }
+.quiet { opacity: 0; }
+tr:hover .quiet, .quiet:focus-visible { opacity: 1; }
+.idc { display: inline-flex; align-items: center; gap: 2px; }
+
+/* page body */
+.page { padding-top: 28px; padding-bottom: 48px; }
+.stack { display: flex; flex-direction: column; gap: 36px; }
+.sec { display: flex; flex-direction: column; gap: 12px; }
+.sec-h { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.tbl { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+th { text-align: left; font-weight: 600; font-size: 12.5px; color: var(--muted); padding: 8px 14px;
+  border-bottom: 1px solid var(--line); white-space: nowrap; background: var(--surface-2); }
+th.num { text-align: right; }
+th.id { width: 1%; }
+td { padding: 9px 14px; border-bottom: 1px solid var(--line-2); vertical-align: middle; }
+tbody tr:last-child td { border-bottom: 0; }
+tbody tr:hover td { background: var(--band); }
+td.empty { color: var(--muted); text-align: center; padding: 24px 14px; }
+.th { display: inline-flex; align-items: center; gap: 2px; }
+.sort { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none; font: inherit;
+  color: inherit; cursor: pointer; }
+.sort:hover { color: var(--ink); }
+.pager { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+.pager .sub { margin-right: 4px; font-variant-numeric: tabular-nums; }
+.pager .btn { height: 28px; padding: 0 10px; }
+.pager .btn:disabled { opacity: 0.45; pointer-events: none; }
+.params { display: flex; flex-direction: column; gap: 2px; font-family: var(--mono); font-size: 12px;
+  color: var(--ink); overflow-wrap: anywhere; }
+.pk { color: var(--muted); }
+
+/* the record page: main column and side groups */
+.record { display: flex; flex-wrap: wrap; gap: 40px; align-items: flex-start; }
+.record-main { flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 32px; }
+.rail { flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; }
+.rail-g { padding: 16px 0; border-bottom: 1px solid var(--line-2); display: flex; flex-direction: column; gap: 10px; }
+.rail-g:first-child { padding-top: 0; }
+.rail-g:last-child { border-bottom: 0; }
+.rail-h { font-size: 13px; font-weight: 650; display: flex; align-items: center; gap: 4px; }
+.kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 7px 14px; margin: 0; font-size: 13px; }
+.kv-row { display: contents; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.btn { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; height: 34px; padding: 0 12px;
+  border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--ink); font-size: 13px;
+  font-weight: 500; white-space: nowrap; }
+.btn:hover { background: var(--surface-2); border-color: var(--ink); color: var(--ink); text-decoration: none; }
+
+/* not found */
+.notfound { display: flex; flex-direction: column; gap: 10px; padding-top: 72px; padding-bottom: 120px; }
+.notfound h1 { font-size: 22px; }
+.links { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 6px; }
+
+/* Header and page layout, after the demo presentation: a wider page; a plain header whose navigation is
+   pill buttons, the current page filled; the checks in a panel, as the presentation's verification panel;
+   the record's side column as a card. */
+.wrap { max-width: 1280px; padding-left: clamp(16px, 2.6vw, 40px); padding-right: clamp(16px, 2.6vw, 40px); }
+.top-in { gap: 24px; padding-top: 14px; padding-bottom: 14px; }
+.search { height: 40px; padding: 0 14px; }
+.nav { gap: 8px; }
+.nav a { padding: 6px 14px; border: 1px solid var(--line); border-radius: 999px; }
+.nav a:hover { border-color: var(--ink); }
+.nav a.on { background: var(--ink); border-color: var(--ink); color: var(--surface, #fff); }
+.band-in { gap: 14px; padding-top: 30px; padding-bottom: 26px; }
+.checks-row { align-items: baseline; margin-top: 4px; padding: 14px 18px; border: 1px solid var(--line);
+  border-radius: 12px; background: var(--surface, #fff);
+  box-shadow: 0 12px 28px -12px color-mix(in srgb, var(--ink-2) 18%, transparent); }
+/* The panel's padding narrows the checks grid: two to a row until four fit. */
+@media (min-width: 1101px) and (max-width: 1180px) { .checks { grid-template-columns: repeat(2, minmax(max-content, 1fr)); } }
+.page { padding-top: 32px; padding-bottom: 56px; }
+.stack { gap: 40px; }
+.record { gap: 32px; }
+.record-main { gap: 36px; }
+.rail { flex-basis: 340px; padding: 18px 20px; border: 1px solid var(--line); border-radius: 12px;
+  background: var(--surface, #fff); }
+.foot-in { padding-top: 18px; padding-bottom: 32px; }
+.notfound { padding-top: 88px; }
+
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+/* Typography: the demo presentation's fonts, Inter for text and Rubik for headings, a size up from before so
+   pages stay readable on a projector. Variable Latin subsets from Fontsource 5.3.0, under the SIL Open Font
+   License 1.1 (Inter-OFL.txt and Rubik-OFL.txt beside them). They sit under assets/ because the backend
+   serves the built UI's /assets/ path and nothing else besides the page. */
+@font-face { font-family: "Inter"; font-style: normal; font-weight: 100 900; font-display: swap;
+  src: url("/assets/fonts/inter-latin-wght-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "Rubik"; font-style: normal; font-weight: 300 900; font-display: swap;
+  src: url("/assets/fonts/rubik-latin-wght-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+:root {
+  --sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, sans-serif;
+  --display: "Rubik", var(--sans);
+}
+body { font-size: 15px; }
+h1 { font-family: var(--display); font-size: 32px; line-height: 1.15; font-weight: 400; letter-spacing: -0.005em; }
+h2 { font-family: var(--display); font-size: 18px; font-weight: 500; }
+.brand { font-family: var(--display); font-size: 17px; font-weight: 600; }
+.mono { font-size: 13.5px; }
+.sub, footer, .pend-t { font-size: 13.5px; }
+.dev, .crumb, .meta, .kv { font-size: 14px; }
+.search input, table, .notice { font-size: 14.5px; }
+/* The checks grid sizes its columns to the widest check, so it gets a smaller gap to keep four to a row. */
+.check { font-size: 14px; }
+.checks { column-gap: 16px; }
+@media (min-width: 1101px) and (max-width: 1140px) { .checks { grid-template-columns: repeat(2, minmax(max-content, 1fr)); } }
+kbd { font-size: 12px; }
+.tag, .pill, .bad-t, .tooltip, .params { font-size: 13px; }
+.btn, th { font-size: 13.5px; }
+/* Small headings over a group are kickers, as in the presentation's panels: capitals, spaced, muted. */
+.checks-h, .rail-h { font-family: var(--sans); font-size: 12.5px; font-weight: 650; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--muted); }
+.notfound h1 { font-size: 28px; }

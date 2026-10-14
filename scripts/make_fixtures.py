@@ -229,7 +229,7 @@ def build() -> tuple[dict[str, bytes], dict]:
         expected[name] = entry
 
     add("om_receipt", OPENMINED.read_bytes(), "OpenMined's receipt, as their enclave signed it", "PPPPPPP",
-        state="verified", strict=422, path=str(OPENMINED.relative_to(ROOT)), network=True)
+        state="verified", strict=201, path=str(OPENMINED.relative_to(ROOT)), network=True)
 
     key_a = ed25519("A")
     base = openmined()

@@ -162,6 +162,7 @@ def test_committed_policies_trust_only_openmined_s_enclave_code(name):
     assert [entry.repo for entry in config.policy.trusted_code] == ["OpenMined/syft-enclave-tinfoil"]
 
 
-def test_committed_strict_policy_lists_no_benchmark_owner():
-    # Strict accepts no one until a real owner is added. The dev example's list is checked in test_fixtures.
-    assert load_config({"REGISTRY_POLICY": str(REPO_ROOT / "registry-policy.yaml")}).policy.benchmark_owners == []
+def test_committed_strict_policy_lists_only_openmineds_sample_owner():
+    # Strict accepts only the approver of OpenMined's sample receipt. The dev example's list is checked in test_fixtures.
+    owners = load_config({"REGISTRY_POLICY": str(REPO_ROOT / "registry-policy.yaml")}).policy.benchmark_owners
+    assert [owner.email for owner in owners] == ["benchmark_owner@openmined.org"]
