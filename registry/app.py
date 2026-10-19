@@ -2,6 +2,7 @@
 
 Run with `flask --app registry.app run --port 5050`, which binds to 127.0.0.1.
 Never add --host 0.0.0.0 or --debug: the Werkzeug debugger allows remote code execution.
+A deployment runs it under gunicorn instead (railpack.json) and sets REGISTRY_PUBLIC_HOST to its hostname.
 """
 
 import importlib.metadata
@@ -11,12 +12,14 @@ import logging
 import os
 import re
 import shlex
+from pathlib import Path
 
-from flask import Flask, abort, jsonify, request, send_file
+from flask import Flask, abort, jsonify, request, send_file, send_from_directory
 from werkzeug.exceptions import HTTPException
 from werkzeug.http import HTTP_STATUS_CODES
 from werkzeug.routing import BaseConverter
 
+from registry import spec
 from registry.config import DEBUG_ENV, ConfigError, enable_debug_logging, load_config
 from registry.index import Index, StaleIndex
 from registry.ingest import ingest
@@ -26,12 +29,17 @@ from registry.store import Store
 log = logging.getLogger(__name__)
 
 TRUSTED_HOSTS = ["localhost", "127.0.0.1"]  # rejects other Host headers: stops DNS rebinding
+PUBLIC_HOST_ENV = "REGISTRY_PUBLIC_HOST"  # a deployment's own hostname, e.g. its *.up.railway.app domain
 MAX_BODY_BYTES = 1024 * 1024  # 1 MiB
 BUNDLE_IGNORED = "bundle ignored: check 7 looks the receipt up on Rekor"
 LOG_INDEX = re.compile(r"[0-9]{1,18}")  # the receipt's entry on Rekor: a non-negative integer that fits int64
 LOG_INDEX_MALFORMED = "logIndex must be one non-negative integer: the receipt's entry index on Rekor"
 NOT_FOUND = "nothing on file for that"
 DEFAULT_LIMIT, MAX_LIMIT = 20, 100  # recent records
+WEB_DIST = Path(__file__).resolve().parents[1] / "web" / "dist"  # the UI, as `pnpm build` writes it
+UI_NOT_BUILT = "the UI isn't built: run `pnpm build` in web/"
+# The UI loads only its own files and calls only its own API, so nothing else may run, load or frame it.
+UI_POLICY = "default-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'"
 
 
 class Hex64(BaseConverter):
@@ -54,8 +62,12 @@ def create_app() -> Flask:
                    f"REGISTRY_POLICY={shlex.quote(str(config.policy_path))} uv run python scripts/rebuild_index.py")
         raise ConfigError(f"{e}. Rebuild it, then restart: {rebuild}") from e
 
+    public_host = os.environ.get(PUBLIC_HOST_ENV)
+    trusted_hosts = [*TRUSTED_HOSTS, public_host] if public_host else TRUSTED_HOSTS
+    log.debug("trusted hosts: %s", trusted_hosts)
+
     app = Flask(__name__)
-    app.config.update(TRUSTED_HOSTS=TRUSTED_HOSTS, MAX_CONTENT_LENGTH=MAX_BODY_BYTES)
+    app.config.update(TRUSTED_HOSTS=trusted_hosts, MAX_CONTENT_LENGTH=MAX_BODY_BYTES)
     app.url_map.converters["hex64"] = Hex64
 
     @app.errorhandler(HTTPException)
@@ -73,7 +85,9 @@ def create_app() -> Flask:
 
     @app.get("/api/health")
     def health():
-        return jsonify(mode=config.mode, policyHash=config.policy_sha256, version=version)
+        # modelRole: which component the UI shows as the model, so the UI hardcodes no spec constant.
+        return jsonify(mode=config.mode, policyHash=config.policy_sha256, version=version,
+                       modelRole=spec.BASE_MODEL_ROLE)
 
     @app.post("/api/records")
     def post_record():
@@ -144,5 +158,17 @@ def create_app() -> Flask:
     @app.get("/api/lookup/<hex64:digest>")
     def lookup(digest):
         return jsonify(found(index.lookup(digest)))
+
+    @app.get("/")
+    def ui():
+        if not (WEB_DIST / "index.html").is_file():
+            abort(404, UI_NOT_BUILT)
+        response = send_from_directory(WEB_DIST, "index.html")
+        response.headers["Content-Security-Policy"] = UI_POLICY
+        return response
+
+    @app.get("/assets/<path:name>")
+    def ui_asset(name):
+        return send_from_directory(WEB_DIST / "assets", name)  # refuses any path outside assets/ with a 404
 
     return app

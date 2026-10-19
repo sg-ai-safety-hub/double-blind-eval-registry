@@ -19,7 +19,7 @@
     "network": true,
     "logIndex": 3129204433,
     "strict": {
-      "status": 422
+      "status": 201
     }
   },
   "sim_A": {

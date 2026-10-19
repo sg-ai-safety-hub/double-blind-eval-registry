@@ -1,14 +1,41 @@
 # Double Blind Eval Registry
 
-A local web app that verifies and indexes AI-evaluation receipts for SASH's Four Pillars project.
+A registry web app that verifies and indexes model evaluation receipts for SASH's Four Pillars project.
 
 The registry runs seven checks on each submitted receipt, stores the exact bytes it received for each
-accepted receipt, and lists what it accepted. Work in progress: receipt ingestion, the index and the
-read API work; the UI is still being built.
+accepted receipt, and lists what it accepted in a read API and a web UI.
+
+## Run it
+
+Needs Python 3.12 with [uv](https://docs.astral.sh/uv/), and Node with pnpm 11 (via corepack).
+
+```bash
+uv sync                                                # backend dependencies
+cd web && pnpm install && pnpm build && cd ..          # frontend, built into web/dist
+uv run flask --app registry.app run --port 5050        # backend and UI at http://127.0.0.1:5050
+```
+
+Add `REGISTRY_MODE=dev` before `uv run flask` to run in dev mode, which also accepts test data. To work on
+the UI with live reload, keep the backend running and run `cd web && pnpm dev` for http://localhost:5173.
+
+### Deploy on Railway
+
+`railpack.json` builds the UI and starts the registry under gunicorn, in strict mode.
+
+**The policy's benchmark owner is a sample.** `registry-policy.yaml` lists `benchmark_owner@openmined.org`,
+the approver of OpenMined's sample receipt, so that the demo has a receipt to accept. Replace it with the real
+benchmark owners' emails before the registry is used for anything but a demo.
+
+In the Railway service:
+
+1. Attach a volume at `/data` and set `REGISTRY_DATA_DIR=/data`, so accepted receipts survive redeploys.
+2. Under Settings → Networking, generate a domain and set `REGISTRY_PUBLIC_HOST` to it (such as
+   `name.up.railway.app`). The registry refuses requests addressed to any other host.
+3. Submit receipts to `https://<domain>/api/records`, as in [Commands](#commands).
 
 ## Receipts
 
-The registry accepts OpenMined's **syft-enclave receipt v3**: the record of one AI evaluation run inside a
+The registry accepts OpenMined's **syft-enclave receipt v3**: the record of one model evaluation run inside a
 [Tinfoil](https://tinfoil.sh) confidential enclave. A receipt is an
 [in-toto Statement v1](https://github.com/in-toto/attestation/blob/main/spec/v1/statement.md) with
 `predicateType` `https://openmined.org/syft-enclave/receipt/v3`, signed by the enclave's attested key and
@@ -49,9 +76,7 @@ a hardware report. Check 7 fetches that one entry. It trusts Rekor's answer: it 
 signed timestamp or inclusion proof, and it doesn't say who logged the receipt.
 
 
-## Run it
-
-Needs Python 3.12 with [uv](https://docs.astral.sh/uv/), and Node with pnpm 11 (via corepack).
+## Commands
 
 ```bash
 uv sync
@@ -66,6 +91,8 @@ uv run python scripts/seed_dev.py   # POSTs every fixture dev mode accepts, Open
 REGISTRY_MODE=dev uv run python scripts/rebuild_index.py   # after editing the policy; then restart
 
 cd web && pnpm install && pnpm dev  # UI at http://localhost:5173
+cd web && pnpm build                # Flask then serves the UI at http://127.0.0.1:5050
+cd web && pnpm test                 # the UI's formatting and routing tests (Node's built-in runner)
 ```
 
 - **Modes.** Strict is the default. Dev mode (`REGISTRY_MODE=dev`) also accepts incomplete receipts and
@@ -78,11 +105,12 @@ cd web && pnpm install && pnpm dev  # UI at http://localhost:5173
 - **Index.** The store (`data/<mode>/store`) holds the exact bytes of each accepted receipt; the index
   (`data/<mode>/index.sqlite3`) is derived from it. The server refuses to start on an index built under
   another policy or mode, and prints the `scripts/rebuild_index.py` command that rebuilds it.
-- **Localhost only.** Never run with `--host 0.0.0.0` or `--debug`.
+- **Flask on 127.0.0.1 only.** Never run it with `--host 0.0.0.0` or `--debug`. A deployment runs gunicorn
+  instead (see [Deploy on Railway](#deploy-on-railway)).
 
 ## API
 
-JSON on `http://127.0.0.1:5050`. Ids and digests in paths are 64 lowercase hex.
+JSON on `http://127.0.0.1:5050`, or on a deployment's domain. Ids and digests in paths are 64 lowercase hex.
 
 | Endpoint | Returns |
 |---|---|

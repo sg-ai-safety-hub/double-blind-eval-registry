@@ -2,9 +2,7 @@
 # After editing: run scripts/rebuild_index.py, then restart.
 trusted_code:            # check 4: whose Sigstore-signed reference measurements count (must be non-empty)
   - repo: OpenMined/syft-enclave-tinfoil
-benchmark_owners: []     # check 6: approver email -> display name. Empty: no receipt is accepted.
+benchmark_owners:        # check 6: approver email -> display name.
                          # OpenMined verifies who owns each email; the registry only matches it.
-# To accept a benchmark owner's approvals, replace `benchmark_owners: []` with entries like:
-# benchmark_owners:
-#   - email: "benchmark_owner@openmined.org"
-#     display: OpenMined sample benchmark owner
+  - email: "benchmark_owner@openmined.org"
+    display: OpenMined sample benchmark owner
