@@ -1,1 +1,1 @@
-"""Four Pillars Registry: verifies and indexes EvalResult/v0.1 receipts."""
+"""Four Pillars Registry: verifies and indexes OpenMined syft-enclave receipt v3 receipts."""

@@ -42,6 +42,12 @@ def test_storing_a_record_again_keeps_the_first_receipt_time(store):
     assert store.read_meta(RECORD_ID) == {"receivedAt": T0}
 
 
+def test_the_rekor_log_index_is_kept_with_the_receipt_time_and_the_first_one_stays(store):
+    store.put_record(RECORD, T0, 3129204433)
+    store.put_record(RECORD, T1, 7)
+    assert store.read_meta(RECORD_ID) == {"receivedAt": T0, "logIndex": 3129204433}
+
+
 def test_record_ids_lists_every_stored_record_in_order(store):
     ids = [store.put_record(raw, T0) for raw in (RECORD, RECORD + b"\n", RECORD + b" ")]
     assert store.record_ids() == sorted(ids)

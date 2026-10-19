@@ -27,9 +27,11 @@ def main() -> int:
             continue
         path = ROOT / entry["record"]
         try:
-            # A multipart file part named "record", as curl -F sends it; requests sends no Origin header.
+            # A multipart file part named "record", as curl -F sends it, and a receipt with a hardware report
+            # carries its Rekor log index. requests sends no Origin header.
+            data = {"logIndex": str(entry["logIndex"])} if "logIndex" in entry else None
             response = requests.post(URL, files={"record": (path.name, path.read_bytes(), "application/json")},
-                                     timeout=TIMEOUT_SECONDS)
+                                     data=data, timeout=TIMEOUT_SECONDS)
         except requests.ConnectionError as e:
             print(f"cannot reach {URL}: is the dev server running? {e}", file=sys.stderr)
             return 1

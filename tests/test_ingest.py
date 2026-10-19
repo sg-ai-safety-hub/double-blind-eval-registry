@@ -1,34 +1,33 @@
 """Ingest: checks in order, the gate, storing and indexing only what was accepted, and rebuilds.
 test_api.py drives every fixture through POST and compares its status with expected.json."""
 
-import base64
-import copy
 import hashlib
 import json
-import runpy
 import sqlite3
 from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 
 import pytest
-import rfc8785
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from fixture_data import CHECKED, DEV_POLICY, EXPECTED, ROOT, STRICT_POLICY, params, record
+from fixture_data import CHECKED, DEV_POLICY, EXPECTED, OPENMINED_LOG_INDEX, STRICT_POLICY, log_index, params, record, rekor
 
-from registry import checks_tinfoil, spec
+from registry import checks_publication, checks_tinfoil, spec
 from registry.config import load_config
 from registry.envelope import parse_receipt
-from registry.evalresult import TIMESTAMP_FORMAT, parse_statement
 from registry.index import Index
-from registry.ingest import ingest, rebuild, verify
-from registry.model import CHECK_IDS, Check, Enclave, Status, VerificationUnavailable
+from registry.ingest import TIMESTAMP_FORMAT, ingest, rebuild, verify
+from registry.model import CHECK_IDS, Check, Enclave, Publication, Status, VerificationUnavailable
 from registry.refcache import RefCache
 from registry.store import Store
+from registry.syft_receipt import parse_statement
 
-FIXTURES = runpy.run_path(str(ROOT / "scripts/make_fixtures.py"))
-DEV_ACCEPTED = [name for name, entry in EXPECTED.items() if entry["dev"]["status"] == 201]
+# Every fixture dev mode accepts that verifies offline (om_receipt's checks 3 and 4 need the network).
+DEV_ACCEPTED = [name for name, entry in EXPECTED.items() if entry["dev"]["status"] == 201 and not entry.get("network")]
 EARLIER = "2026-09-01T00:00:00Z"
+OPENMINED_OWNER = {"email": "benchmark_owner@openmined.org", "display": "OpenMined sample benchmark owner"}
+LOG_INDEX_REQUIRED = "logIndex is required: the receipt has a hardware report, so check 7 looks up its entry on Rekor"
+ENCLAVE = Enclave(measurement="33" * 48, repo="OpenMined/syft-enclave-tinfoil", release_tag="v0.1.28",
+                  release_digest="74" * 32)
 
 
 @pytest.fixture
@@ -46,8 +45,8 @@ def refcache(tmp_path):
     return RefCache(tmp_path / "refcache")
 
 
-def config(mode: str):
-    policy = DEV_POLICY if mode == "dev" else STRICT_POLICY
+def config(mode: str, policy: Path | None = None):
+    policy = policy or (DEV_POLICY if mode == "dev" else STRICT_POLICY)
     return load_config({"REGISTRY_MODE": mode, "REGISTRY_POLICY": str(policy)})
 
 
@@ -55,14 +54,10 @@ def statuses(body: dict) -> dict:
     return {c["id"]: c["status"] for c in body["checks"]}
 
 
-def owner_key(name: str) -> str:
-    return parse_statement(parse_receipt(record(name)).statement).predicate.owner_key(spec.BENCHMARK_OWNER)
-
-
 @pytest.mark.parametrize("name", params(CHECKED))
 def test_checks_run_in_order_and_match_expected(name, refcache):
     receipt = parse_receipt(record(name))
-    result = verify(receipt, parse_statement(receipt.statement), config("dev").policy, refcache)
+    result = verify(receipt, parse_statement(receipt.statement), config("dev").policy, refcache, log_index(name))
     assert tuple(c.id for c in result.checks) == CHECK_IDS
     assert {c.id: c.status for c in result.checks} == EXPECTED[name]["checks"]
 
@@ -82,7 +77,7 @@ def test_the_accepted_answer_is_the_indexed_record(store, index, refcache):
     assert body == index.get(EXPECTED["sim_A"]["recordId"]).to_json()
     assert body["state"] == "incomplete"
     assert statuses(body) == EXPECTED["sim_A"]["checks"]
-    assert body["benchmarkOwner"] == {"publicKey": owner_key("sim_A"), "display": "DBE sample benchmark owner"}
+    assert body["benchmarkOwner"] == OPENMINED_OWNER
     assert body["size"] == len(record("sim_A"))
     datetime.strptime(body["receivedAt"], TIMESTAMP_FORMAT)  # the registry's own clock, in the receipts' format
 
@@ -102,8 +97,8 @@ def test_a_stored_record_missing_from_the_index_is_indexed_as_new_with_its_first
     assert index.get(EXPECTED["sim_A"]["recordId"]).received_at == EARLIER
 
 
-@pytest.mark.parametrize("name", ["U1_predicate_type", "S1_no_reference_value", "C1_edit_after_sign",
-                                  "C14_unlisted_bo", "sim_A_noconsent"])
+@pytest.mark.parametrize("name", ["U1_predicate_type", "S2_no_consent", "C1_edit_after_sign",
+                                  "C6_unlisted_approver"])
 def test_a_refused_record_is_not_stored(store, index, refcache, name):
     assert ingest(record(name), config("dev"), store, index, refcache).status >= 400
     assert not store.root.exists()
@@ -134,46 +129,37 @@ def test_a_failed_check_is_refused_with_the_checks(store, index, refcache):
     assert statuses(result.body) == EXPECTED["C1_edit_after_sign"]["checks"]
 
 
-def test_strict_mode_refuses_pending_checks(store, index, refcache):
-    result = ingest(record("sim_A"), config("strict"), store, index, refcache)
+def test_strict_mode_refuses_pending_checks():
+    # The committed strict policy lists nobody, so list sim_A's approver: only PENDING is left to refuse.
+    listing = Path("listing.yaml")
+    listing.write_text("trusted_code:\n  - repo: OpenMined/syft-enclave-tinfoil\nbenchmark_owners:\n"
+                       f'  - email: "{OPENMINED_OWNER["email"]}"\n    display: {OPENMINED_OWNER["display"]}\n')
+    cfg = config("strict", listing)
+    result = ingest(record("sim_A"), cfg, Store(Path("store")), Index.create(Path("index.sqlite3"), "00" * 32, "strict"),
+                    RefCache(Path("refcache")))
     assert (result.status, result.body["detail"]) == (422, "incomplete records are accepted only in dev mode")
     assert statuses(result.body) == EXPECTED["sim_A"]["checks"]
 
 
-def test_an_unlisted_owner_is_refused_with_the_checks_and_the_key(store, index, refcache):
-    result = ingest(record("C14_unlisted_bo"), config("dev"), store, index, refcache)
-    assert result.status == 403
-    assert result.body["detail"] == f"the {spec.BENCHMARK_OWNER} key is not on this registry's list"
-    assert result.body["benchmarkOwner"] == {"publicKey": owner_key("C14_unlisted_bo")}
-    # The gate never changes a check result: consent still PASSes.
-    assert statuses(result.body) == EXPECTED["C14_unlisted_bo"]["checks"]
-
-
-def test_no_consent_is_refused_with_the_checks(store, index, refcache):
-    result = ingest(record("sim_A_noconsent"), config("dev"), store, index, refcache)
-    assert (result.status, result.body["detail"]) == (403, f"{spec.BENCHMARK_OWNER} approval required")
-    assert statuses(result.body) == EXPECTED["sim_A_noconsent"]["checks"]
-
-
-def test_a_listed_owner_whose_own_approval_fails_is_refused_with_422(store, index, refcache):
-    # Check 7 FAILs before the gate runs. Tamper the benchmark owner's approval, then re-sign with key A.
-    statement = copy.deepcopy(parse_receipt(record("sim_A")).statement)
-    approval, = (a for a in statement["predicate"]["consent"]["approvals"] if a["party"] == spec.BENCHMARK_OWNER)
-    signature = bytearray(base64.b64decode(approval["signature"]))
-    signature[0] ^= 1
-    approval["signature"] = base64.b64encode(bytes(signature)).decode()
-    raw = FIXTURES["envelope"](rfc8785.dumps(statement), Ed25519PrivateKey.from_private_bytes(FIXTURES["seed"]("A")))
-
-    result = ingest(raw, config("dev"), store, index, refcache)
+def test_an_unlisted_approver_is_refused_with_the_checks(store, index, refcache):
+    result = ingest(record("C6_unlisted_approver"), config("dev"), store, index, refcache)
     assert (result.status, result.body["detail"]) == (422, "failed: consent")
-    assert statuses(result.body)["signature"] == "PASS"
+    assert statuses(result.body) == EXPECTED["C6_unlisted_approver"]["checks"]
+    assert "benchmarkOwner" not in result.body
 
 
 def hardware(status: Status, enclave: Enclave | None = None):
     """A stand-in for checks 2-4: all three with `status`, and these enclave facts."""
-    def check_attestation(attestation, run_public_key, trusted_code, refcache):
+    def check_attestation(attestation, trusted_code, refcache):
         return tuple(Check(check_id, status, "stand-in") for check_id in CHECK_IDS[1:4]), enclave
     return check_attestation
+
+
+def published(publication: Publication):
+    """A stand-in for check 7 that PASSes with these facts."""
+    def check_publication(receipt, key_binding, log_index):
+        return Check("publication", Status.PASS, "stand-in"), publication
+    return check_publication
 
 
 def test_a_network_failure_during_the_checks_is_a_503_and_stores_nothing(store, index, refcache, monkeypatch):
@@ -189,18 +175,85 @@ def test_a_network_failure_during_the_checks_is_a_503_and_stores_nothing(store, 
     assert index.recent(100) == []
 
 
-def test_a_verified_answer_carries_the_verified_enclave_facts(store, index, refcache, monkeypatch):
-    enclave = Enclave(measurement="6d" * 48, repo="tinfoilsh/double-blind-eval", release_tag="v0.0.4",
-                      release_digest="fe" * 32)
+def test_a_verified_answer_carries_the_verified_enclave_and_publication_facts(store, index, refcache, monkeypatch):
+    enclave = ENCLAVE
+    publication = Publication(uuid="10" * 40, log_index=3129204433, integrated_time=1791368875,
+                              url=spec.REKOR_SEARCH_LINK.format(3129204433))
     monkeypatch.setattr(checks_tinfoil, "check_attestation", hardware(Status.PASS, enclave))
+    monkeypatch.setattr(checks_publication, "check_publication", published(publication))
     body = ingest(record("sim_A"), config("dev"), store, index, refcache).body
     assert body["state"] == "verified"
-    assert body["enclave"] == {"type": "AMD SEV-SNP", "measurement": "6d" * 48, "repo": "tinfoilsh/double-blind-eval",
-                               "releaseTag": "v0.0.4", "releaseDigest": "fe" * 32}
+    assert body["enclave"] == {"type": "AMD SEV-SNP", "measurement": "33" * 48,
+                               "repo": "OpenMined/syft-enclave-tinfoil", "releaseTag": "v0.1.28",
+                               "releaseDigest": "74" * 32}
+    assert body["publication"] == {"uuid": "10" * 40, "logIndex": 3129204433, "integratedTime": 1791368875,
+                                   "url": spec.REKOR_SEARCH_LINK.format(3129204433)}
 
 
-def test_an_incomplete_answer_has_no_enclave_facts(store, index, refcache):
-    assert ingest(record("sim_A"), config("dev"), store, index, refcache).body["enclave"] is None
+def test_an_incomplete_answer_has_no_enclave_or_publication_facts(store, index, refcache):
+    body = ingest(record("sim_A"), config("dev"), store, index, refcache).body
+    assert (body["enclave"], body["publication"]) == (None, None)
+
+
+def test_a_network_failure_during_check_7_is_a_503_and_stores_nothing(store, index, refcache, monkeypatch):
+    def unavailable(*args):
+        raise VerificationUnavailable("check 7 could not reach the network: connection refused")
+    monkeypatch.setattr(checks_tinfoil, "check_attestation", hardware(Status.PASS))
+    monkeypatch.setattr(checks_publication, "check_publication", unavailable)
+    result = ingest(record("sim_A"), config("dev"), store, index, refcache)
+    assert (result.status, result.body["detail"]) == (
+        503, "verification unavailable, try again later: check 7 could not reach the network: connection refused")
+    assert not store.root.exists()
+
+
+# --- the Rekor log index -------------------------------------------------------
+
+def test_a_receipt_with_a_hardware_report_and_no_log_index_is_refused_with_400_before_any_check(
+        store, index, refcache, monkeypatch):
+    def no_check(*args):
+        raise AssertionError("no check may run")
+    monkeypatch.setattr(checks_tinfoil, "check_attestation", no_check)
+    monkeypatch.setattr(checks_publication, "check_publication", no_check)
+    result = ingest(record("om_receipt"), config("dev"), store, index, refcache)
+    assert (result.status, result.body) == (400, {"recordId": EXPECTED["om_receipt"]["recordId"],
+                                                  "detail": LOG_INDEX_REQUIRED})
+    assert not store.root.exists()
+
+
+def openmined_verified(monkeypatch):
+    """A dev registry in ./data where OpenMined's receipt verifies offline: checks 2-4 stand in as PASS, and
+    check 7 asks the captured Rekor. Returns its config, store, index and refcache."""
+    monkeypatch.setattr(checks_tinfoil, "check_attestation", hardware(Status.PASS, ENCLAVE))
+    cfg = dev_config()
+    return cfg, Store(cfg.store_dir), Index.open(cfg.index_path, cfg.policy_sha256, cfg.mode), RefCache(cfg.refcache_dir)
+
+
+def test_the_log_index_is_stored_with_the_record_and_a_rebuild_looks_up_the_same_entry(monkeypatch):
+    cfg, store, index, refcache = openmined_verified(monkeypatch)
+    record_id = EXPECTED["om_receipt"]["recordId"]
+    with rekor() as fetched:
+        result = ingest(record("om_receipt"), cfg, store, index, refcache, log_index=OPENMINED_LOG_INDEX)
+        assert (result.status, result.body["publication"]["logIndex"]) == (201, OPENMINED_LOG_INDEX)
+        assert store.read_meta(record_id)["logIndex"] == OPENMINED_LOG_INDEX
+        cfg.index_path.unlink()
+        assert rebuild(cfg, store, refcache) == (1, [])
+    assert [call.args for call in fetched.call_args_list] == [(OPENMINED_LOG_INDEX,)] * 2
+    assert Index.open(cfg.index_path, cfg.policy_sha256, cfg.mode).get(record_id).publication.log_index == \
+        OPENMINED_LOG_INDEX
+
+
+def test_a_record_stored_before_keeps_its_first_log_index(monkeypatch):
+    cfg, store, index, refcache = openmined_verified(monkeypatch)
+    with rekor():  # any index but OpenMined's is a 404, so check 7 would FAIL with the new one
+        assert ingest(record("om_receipt"), cfg, store, index, refcache, log_index=OPENMINED_LOG_INDEX).status == 201
+        again = ingest(record("om_receipt"), cfg, store, index, refcache, log_index=OPENMINED_LOG_INDEX + 1)
+    assert again.status == 200
+    assert store.read_meta(EXPECTED["om_receipt"]["recordId"])["logIndex"] == OPENMINED_LOG_INDEX
+
+
+def test_a_test_data_receipt_needs_no_log_index_and_stores_none(store, index, refcache):
+    assert ingest(record("sim_A"), config("dev"), store, index, refcache).status == 201
+    assert set(store.read_meta(EXPECTED["sim_A"]["recordId"])) == {"receivedAt"}
 
 
 # --- rebuild -----------------------------------------------------------------
@@ -239,18 +292,17 @@ def test_a_rebuild_reproduces_the_same_rows(seeded):
 def test_a_rebuild_under_a_new_policy_leaves_out_what_it_now_refuses(seeded):
     cfg, store, refcache = seeded
     narrower = Path("narrower.yaml")
-    narrower.write_text("trusted_code:\n  - repo: tinfoilsh/double-blind-eval\nbenchmark_owners:\n"
-                        f'  - public_key: "{owner_key("sim_A")}"\n    display: The worked example\'s owner only\n')
+    narrower.write_text("trusted_code:\n  - repo: OpenMined/syft-enclave-tinfoil\nbenchmark_owners:\n"
+                        f'  - email: "{OPENMINED_OWNER["email"]}"\n    display: OpenMined\'s owner only\n')
     new = dev_config(narrower)
     indexed, skipped = rebuild(new, store, refcache)
     synthetic = [name for name in DEV_ACCEPTED if name.startswith("D")]
     assert indexed == len(DEV_ACCEPTED) - len(synthetic)
     assert sorted(record_id for record_id, _ in skipped) == sorted(EXPECTED[name]["recordId"] for name in synthetic)
-    assert {why for _, why in skipped} == {f"403 the {spec.BENCHMARK_OWNER} key is not on this registry's list"}
+    assert {why for _, why in skipped} == {"422 failed: consent"}
     assert len(store.record_ids()) == len(DEV_ACCEPTED)  # refused now, but still stored
     index = Index.open(new.index_path, new.policy_sha256, new.mode)  # built under the new policy
-    assert sorted(r.record_id for r in index.recent(100)) == sorted(EXPECTED[name]["recordId"]
-                                                                   for name in ("sim_A", "sim_A_ec"))
+    assert [r.record_id for r in index.recent(100)] == [EXPECTED["sim_A"]["recordId"]]
 
 
 def test_a_rebuild_leaves_out_a_record_whose_stored_bytes_no_longer_match_its_id(seeded):

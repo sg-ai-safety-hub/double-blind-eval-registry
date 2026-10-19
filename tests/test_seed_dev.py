@@ -4,7 +4,7 @@ import importlib.util
 
 import pytest
 import requests
-from fixture_data import EXPECTED, ROOT, record
+from fixture_data import EXPECTED, ROOT, log_index, record
 
 DEV_ACCEPTED = [name for name, entry in EXPECTED.items() if entry["dev"]["status"] == 201]
 
@@ -46,6 +46,13 @@ def test_seeding_posts_every_fixture_dev_mode_accepts_as_a_record_file_part(serv
         assert url == "http://127.0.0.1:5050/api/records"
         assert set(files) == {"record"}
         assert "headers" not in kwargs  # no Origin header: the registry refuses a POST that carries one
+
+
+def test_a_fixture_with_a_hardware_report_is_posted_with_its_rekor_log_index(server):
+    assert load_script().main() == 0
+    sent = [kwargs.get("data") for _, _, kwargs in server["posts"]]
+    assert sent == [None if log_index(name) is None else {"logIndex": str(log_index(name))} for name in DEV_ACCEPTED]
+    assert any(sent)  # OpenMined's receipt
 
 
 def test_seeding_again_is_fine(server):

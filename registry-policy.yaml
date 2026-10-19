@@ -1,10 +1,10 @@
 # registry-policy.yaml: the strict-mode trust policy.
 # After editing: run scripts/rebuild_index.py, then restart.
 trusted_code:            # check 4: whose Sigstore-signed reference measurements count (must be non-empty)
-  - repo: tinfoilsh/double-blind-eval
-benchmark_owners: []     # acceptance gate: Ed25519 public key (64 hex) -> display name. Empty: no receipt is accepted.
-                         # How these keys are established is out of MVP scope.
-# To accept a benchmark owner, replace `benchmark_owners: []` with entries like:
+  - repo: OpenMined/syft-enclave-tinfoil
+benchmark_owners: []     # check 6: approver email -> display name. Empty: no receipt is accepted.
+                         # OpenMined verifies who owns each email; the registry only matches it.
+# To accept a benchmark owner's approvals, replace `benchmark_owners: []` with entries like:
 # benchmark_owners:
-#   - public_key: "3888833eb8844b23a79a5a4bf258b3c718fd0cc3997b8d000f29f88855252d9c"
-#     display: DBE sample benchmark owner
+#   - email: "benchmark_owner@openmined.org"
+#     display: OpenMined sample benchmark owner

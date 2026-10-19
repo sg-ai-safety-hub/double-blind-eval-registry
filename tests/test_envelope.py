@@ -10,7 +10,7 @@ STATEMENT = {
     "_type": spec.STATEMENT_TYPE,
     "subject": [{"name": "s", "digest": {"sha256": "ab" * 32}}],
     "predicateType": spec.PREDICATE_TYPE,
-    "predicate": {"version": spec.PREDICATE_VERSION},
+    "predicate": {},  # recognition reads no predicate field: that is the schema's job
 }
 
 
@@ -52,7 +52,7 @@ def rejected(body: bytes, match: str) -> None:
         parse_receipt(body)
 
 
-def test_recognises_an_evalresult_envelope():
+def test_recognises_a_receipt_envelope():
     body = raw(envelope())
     receipt = parse_receipt(body)
     assert receipt.raw is body
@@ -140,20 +140,19 @@ def test_payload_must_be_standard_base64(payload):
     [
         (b"not json", "payload is not valid JSON"),
         (b'{"_type": "a", "_type": "b"}', 'duplicate key "_type"'),
-        (statement(predicate={"version": spec.PREDICATE_VERSION, "system": {"a": 1}}).replace(
-            b'{"a": 1}', b'{"a": 1, "a": 2}'), 'duplicate key "a"'),
+        (statement(predicate={"evalPipeline": {"a": 1}}).replace(b'{"a": 1}', b'{"a": 1, "a": 2}'),
+         'duplicate key "a"'),
         (b"[1]", "statement: Input should be a valid dictionary"),
         (statement(comment="x"), "unknown top-level field"),
         (statement(_type="https://in-toto.io/Statement/v0.1"), "_type: Input should be"),
         (statement(predicateType="https://slsa.dev/provenance/v1"),
          r"predicateType: Input should be .*, got 'https://slsa\.dev/provenance/v1'"),
-        (statement(predicate={"version": "other"}), r"predicate\.version: Input should be"),
         (statement(predicate=[]), "predicate: Input should be a valid dictionary"),
     ],
     ids=["not-json", "duplicate-key", "nested-duplicate-key", "not-object", "extra-field", "wrong-type",
-         "wrong-predicate-type", "wrong-version", "predicate-not-object"],
+         "wrong-predicate-type", "predicate-not-object"],
 )
-def test_statement_must_be_an_evalresult(payload, match):
+def test_statement_must_be_a_syft_receipt(payload, match):
     rejected(raw(envelope(payload)), match)
 
 

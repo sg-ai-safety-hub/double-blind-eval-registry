@@ -8,10 +8,10 @@ from registry.config import ConfigError, load_config
 REPO_ROOT = Path(__file__).resolve().parents[1]
 POLICY = """\
 trusted_code:
-  - repo: tinfoilsh/double-blind-eval
+  - repo: OpenMined/syft-enclave-tinfoil
 benchmark_owners: []
 """
-KEY = "3888833eb8844b23a79a5a4bf258b3c718fd0cc3997b8d000f29f88855252d9c"
+EMAIL = "benchmark_owner@openmined.org"
 
 
 def owners(entries: str) -> str:
@@ -99,18 +99,20 @@ def test_policy_hash_is_sha256_of_the_raw_file_bytes():
         "trusted_code: [\n",
         "benchmark_owners: []\n",
         "trusted_code: []\nbenchmark_owners: []\n",
-        "trusted_code:\n  - repo: github.com/tinfoilsh/double-blind-eval\nbenchmark_owners: []\n",
-        "trusted_code:\n  - repo: tinfoilsh\nbenchmark_owners: []\n",
-        "trusted_code:\n  - repo: tinfoilsh/double-blind-eval\n    tag: v0.1.0\nbenchmark_owners: []\n",
-        "trusted_code:\n  - repo: tinfoilsh/double-blind-eval\n",
+        "trusted_code:\n  - repo: github.com/OpenMined/syft-enclave-tinfoil\nbenchmark_owners: []\n",
+        "trusted_code:\n  - repo: OpenMined\nbenchmark_owners: []\n",
+        "trusted_code:\n  - repo: OpenMined/syft-enclave-tinfoil\n    tag: v0.1.28\nbenchmark_owners: []\n",
+        "trusted_code:\n  - repo: OpenMined/syft-enclave-tinfoil\n",
         POLICY + "trusted_domains: []\n",
         POLICY.replace("benchmark_owners: []", "publishers: []"),
-        owners(f'  - public_key: "{KEY}"\n'),
-        owners(f'  - public_key: "{KEY.upper()}"\n    display: X\n'),
-        owners('  - public_key: "3888833e"\n    display: X\n'),
-        owners(f'  - public_key: "{KEY}"\n    display: X\n  - public_key: "{KEY}"\n    display: Y\n'),
-        owners(f'  - public_key: "{KEY}"\n    display: yes\n'),
-        owners(f'  - public_key: "{KEY}"\n    display: !!binary WA==\n'),
+        owners(f'  - email: "{EMAIL}"\n'),
+        owners('  - email: "benchmark_owner"\n    display: X\n'),
+        owners('  - email: "a@b@c"\n    display: X\n'),
+        owners(f'  - email: " {EMAIL}"\n    display: X\n'),
+        owners(f'  - email: "{EMAIL}"\n    display: X\n  - email: "{EMAIL}"\n    display: Y\n'),
+        owners('  - public_key: "3888833eb8844b23a79a5a4bf258b3c718fd0cc3997b8d000f29f88855252d9c"\n    display: X\n'),
+        owners(f'  - email: "{EMAIL}"\n    display: yes\n'),
+        owners(f'  - email: "{EMAIL}"\n    display: !!binary WA==\n'),
     ],
     ids=[
         "empty-file",
@@ -124,9 +126,11 @@ def test_policy_hash_is_sha256_of_the_raw_file_bytes():
         "unknown-top-level-key",
         "publishers-instead-of-owners",
         "owner-without-display",
-        "owner-key-uppercase",
-        "owner-key-short",
-        "owner-key-listed-twice",
+        "owner-email-without-at",
+        "owner-email-two-ats",
+        "owner-email-with-space",
+        "owner-email-listed-twice",
+        "owner-by-key",
         "owner-display-yaml-bool",
         "owner-display-yaml-binary",
     ],
@@ -138,15 +142,24 @@ def test_invalid_policy_refuses_to_start(text):
 
 
 def test_benchmark_owners_load_with_their_display_names():
-    write("registry-policy.yaml", owners(f'  - public_key: "{KEY}"\n    display: DBE sample\n'))
+    write("registry-policy.yaml", owners(f'  - email: "{EMAIL}"\n    display: OpenMined sample\n'))
     owner, = load_config({}).policy.benchmark_owners
-    assert (owner.public_key, owner.display) == (KEY, "DBE sample")
+    assert (owner.email, owner.display) == (EMAIL, "OpenMined sample")
+
+
+def test_first_listed_is_the_entry_for_the_first_listed_email_given():
+    write("registry-policy.yaml", owners('  - email: "a@example.org"\n    display: A\n'
+                                         '  - email: "b@example.org"\n    display: B\n'))
+    policy = load_config({}).policy
+    assert policy.first_listed(["x@example.org", "b@example.org", "a@example.org"]).display == "B"
+    assert policy.first_listed(["x@example.org", "A@example.org", " a@example.org"]) is None  # matched exactly
+    assert policy.first_listed([]) is None
 
 
 @pytest.mark.parametrize("name", ["registry-policy.yaml", "registry-policy.dev.example.yaml"])
-def test_committed_policies_trust_only_dbe_code(name):
+def test_committed_policies_trust_only_openmined_s_enclave_code(name):
     config = load_config({"REGISTRY_POLICY": str(REPO_ROOT / name)})
-    assert [entry.repo for entry in config.policy.trusted_code] == ["tinfoilsh/double-blind-eval"]
+    assert [entry.repo for entry in config.policy.trusted_code] == ["OpenMined/syft-enclave-tinfoil"]
 
 
 def test_committed_strict_policy_lists_no_benchmark_owner():

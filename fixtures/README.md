@@ -1,19 +1,32 @@
 # Fixtures
 
-Nothing here is a trustworthy record. Fixture keys are derived from public names. Most fixture quotes
-are `SIMULATED-` sentinels; the rest never bind the receipt's key: a live Tinfoil report stapled onto a
-receipt it doesn't belong to (stapled_B, C11–C13; C8 with one byte flipped), or random bytes (C9).
-Never publish a fixture to production Sigstore.
+Apart from OpenMined's receipt (`openmined/`), nothing here is a trustworthy record. Fixture keys are
+derived from public names. Most fixtures' hardware reports are `SIMULATED-` sentinels; the rest never bind
+the receipt's key: a real report stapled onto a receipt it doesn't belong to (stapled_B, C11–C13; C8 with
+one byte flipped), or random bytes (C9). Never publish a fixture to production Sigstore, and never log one on Rekor.
 
 | Path | Contents | Made by |
 |---|---|---|
-| `evalresult/worked_example.statement.json` | The worked example: a complete, unsigned EvalResult/v0.1 statement. It predates DBE's party names (`model_provider`, `evaluator`), so `make_fixtures.py` renames those roles to `model-owner` and `benchmark-owner`. | Given. Never edit. |
+| `openmined/receipt.dsse.json` | A real syft-enclave receipt v3 from OpenMined's enclave (fixture om_receipt). Every generated fixture starts from its statement. | Given by OpenMined; see below. Never edit. |
+| `openmined/sample-receipt.json` | The same statement, without its DSSE envelope, so unsigned (fixture U7). | Given by OpenMined. Never edit. |
 | `generated/`, `expected.json` | A signed receipt for each test case, and the verdict each one should get. | `uv run python scripts/make_fixtures.py` (deterministic). Never hand-edit. |
 | `dbe/sample-receipt.json` | A sample of DBE's own receipt format, dbe-receipt-v1, which the registry does not accept (fixture U6). | Captured once; see below. Never regenerate. |
-| `tinfoil/` | Live SEV-SNP reports (`<name>.quote`: base64 of the raw report) with a sidecar (`<name>.meta.json`: repo, release tag, capture time). The live fixtures (stapled_B, C8, C9, C11–C13) are built from them. | Captured once; see below. `scripts/capture_tinfoil_reports.py` never overwrites a capture. Never regenerate. |
+| `rekor/` | Rekor's answer for OpenMined's receipt: `om_receipt.entry.json`, its entry, fetched by its log index (3129204433). Offline tests answer check 7 with it. | Captured once with curl; see below. Never edit. |
+| `tinfoil/` | Live SEV-SNP reports (`<name>.quote`: base64 of the raw report) with a sidecar (`<name>.meta.json`: repo, release tag, capture time). C11 and C12 are built from the router capture. | Captured once; see below. `scripts/capture_tinfoil_reports.py` never overwrites a capture. Never regenerate. |
 
-The benchmark-owner keys the fixtures use are listed in `registry-policy.dev.example.yaml`, except
-`C14_unlisted_bo`'s, which must stay off it. `make_fixtures.py` prints them.
+`registry-policy.dev.example.yaml` lists an approver email of every fixture except `C6_unlisted_approver`,
+none of whose approvers may be listed. `make_fixtures.py` prints the emails.
+
+## `openmined/`
+
+| File | sha256 | Bytes |
+|---|---|---|
+| `receipt.dsse.json` | `3bc3aabb8473df45e75ab91e624cca1a5588a3ff6e4a39215e7c0f6f8f96fd31` | 147162 |
+| `sample-receipt.json` | `0bcd509ffc1d5406c7d4f26450ceff298bc4b8bfb09e8d05ca906bea385c6bc0` | 120224 |
+
+The receipt's report measures `OpenMined/syft-enclave-tinfoil` `v0.1.28` (digest `747df14f…`). The generated
+fixtures leave out its statement's bulky parts the registry never reads: file contents and the attestation's
+`collateral`.
 
 ## `dbe/sample-receipt.json`
 
@@ -24,6 +37,26 @@ The benchmark-owner keys the fixtures use are listed in `registry-policy.dev.exa
 - Git blob `dca8df89527b4d54a3eed99a33d02a42e1f1f332`, 2655 bytes: `git hash-object fixtures/dbe/sample-receipt.json`
   prints it.
 
+## `rekor/`
+
+Rekor's answer, saved byte for byte, for the entry OpenMined's benchmark owner logged, fetched as check 7
+fetches it: by its log index.
+
+```bash
+curl 'https://rekor.sigstore.dev/api/v1/log/entries?logIndex=3129204433' -o om_receipt.entry.json
+```
+
+| File | sha256 | Bytes |
+|---|---|---|
+| `om_receipt.entry.json` | `5ee741943e59cb0f2e79f6ebd63c861d6f7661e7f448c5c4cf541c2d95e6db88` | 3577 |
+
+`expected.json` gives every fixture with a hardware report this `logIndex`, and the tests POST them with it.
+Only `om_receipt` is in that entry, so check 7 FAILs the others.
+
+The entry is Rekor v1 `dsse` entry 3129204433. Its payload hash and signature
+are the receipt's; its envelope hash isn't sha256 of `receipt.dsse.json`, because the envelope was
+re-serialised before it was logged.
+
 ## `tinfoil/`
 
 Captured by `scripts/capture_tinfoil_reports.py` from Tinfoil's bundle service
@@ -32,7 +65,7 @@ checks 3 and 4 fetch those themselves.
 
 | Capture | Enclave | Repo | Release | Report |
 |---|---|---|---|---|
-| `dbe` | `dbe.tinfoil.containers.tinfoil.dev` | `tinfoilsh/double-blind-eval` | `v0.0.4` (digest `feb73226…`) | 1184 bytes |
+| `dbe` (no longer used by the fixtures) | `dbe.tinfoil.containers.tinfoil.dev` | `tinfoilsh/double-blind-eval` | `v0.0.4` (digest `feb73226…`) | 1184 bytes |
 | `router` | the service's default router (`inference.tinfoil.sh`) | `tinfoilsh/confidential-model-router` | `v0.0.155` (digest `ad95d02b…`) | 1184 bytes |
 
 Each release was the repo's latest at capture, and its digest matched the bundle's.

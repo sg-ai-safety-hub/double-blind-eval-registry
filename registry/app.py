@@ -9,6 +9,7 @@ import io
 import json
 import logging
 import os
+import re
 import shlex
 
 from flask import Flask, abort, jsonify, request, send_file
@@ -26,7 +27,9 @@ log = logging.getLogger(__name__)
 
 TRUSTED_HOSTS = ["localhost", "127.0.0.1"]  # rejects other Host headers: stops DNS rebinding
 MAX_BODY_BYTES = 1024 * 1024  # 1 MiB
-BUNDLE_IGNORED = "bundle ignored: publication is not verified in this version"
+BUNDLE_IGNORED = "bundle ignored: check 7 looks the receipt up on Rekor"
+LOG_INDEX = re.compile(r"[0-9]{1,18}")  # the receipt's entry on Rekor: a non-negative integer that fits int64
+LOG_INDEX_MALFORMED = "logIndex must be one non-negative integer: the receipt's entry index on Rekor"
 NOT_FOUND = "nothing on file for that"
 DEFAULT_LIMIT, MAX_LIMIT = 20, 100  # recent records
 
@@ -83,7 +86,11 @@ def create_app() -> Flask:
         records = request.files.getlist("record")
         if len(records) != 1:
             abort(400, "send the receipt as one multipart file part named 'record'")
-        result = ingest(records[0].read(), config, store, index, refcache)
+        log_indexes = request.form.getlist("logIndex")  # required for a receipt with a hardware report: ingest says
+        if len(log_indexes) > 1 or (log_indexes and not LOG_INDEX.fullmatch(log_indexes[0])):
+            abort(400, LOG_INDEX_MALFORMED)
+        log_index = int(log_indexes[0]) if log_indexes else None
+        result = ingest(records[0].read(), config, store, index, refcache, log_index)
 
         body = dict(result.body)
         if result.status >= 400:
