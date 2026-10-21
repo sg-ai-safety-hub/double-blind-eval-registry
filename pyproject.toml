@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Double Blind Eval Registry: a web app that verifies and indexes model evaluation receipts."
 requires-python = "~=3.12.0"
 dependencies = [
+    "certifi==2026.10.19",
     "flask==3.1.3",
     "gunicorn==26.2.0",
     "jiter==0.17.0",
@@ -30,7 +31,12 @@ build-backend = "uv_build"
 
 [tool.uv]
 # Supply-chain cooldown: never resolve a release uploaded in the last 7 days.
+# certifi is exempted from the cooldown to pick up trust-store security
+# updates promptly; other releases keep the cooldown.
 exclude-newer = "7 days"
+exclude-newer-package = [
+    { name = "certifi", newer-than = "2026-10-19" },
+]
 
 [tool.uv.build-backend]
 # Flat layout: the package is ./registry, not ./src/registry.
